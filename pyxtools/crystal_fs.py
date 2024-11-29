@@ -157,3 +157,38 @@ def generate_realspace_lattice_points(N_ucs: int, realspaceVecs: np.ndarray) -> 
                     R_n.append(R)
 
     return np.array(R_n)
+
+def set_shape_array(arraysize, normals):
+    """
+    Create a shape function array representing the crystal's geometry.
+
+    Args:
+        arraysize (tuple): Dimensions of the 3D array representing the crystal grid.
+        normals (list): List of facet normal vectors. Each facet is defined by a set of
+                        start and end coordinates [x0, y0, z0, x1, y1, z1].
+
+    Returns:
+        None: The indices, and the shape array
+    """
+    # Initialize the shape array
+    shape_array = np.zeros(arraysize, dtype=np.uint8)  # Binary array to represent shape (0 or 1)
+    n_voxels = np.prod(arraysize)
+
+    # Generate 3D grid indices for the shape array
+    indices = np.transpose(np.unravel_index(np.arange(n_voxels), arraysize))
+
+    # Process each surface defined by normals
+    for surface in normals:
+        start = np.array(surface[:3])  # Start coordinates
+        end = np.array(surface[3:])   # End coordinates
+        normal = (end - start)
+        normal /= np.linalg.norm(normal)  # Normalize the normal vector
+
+        # Determine which points lie "inside" the surface
+        inside = np.dot(indices - start, normal) < 0
+        shape_array[inside] = 1  # Mark voxels inside the shape as 1
+
+    # Store the shape array
+    shape_array = np.ascontiguousarray(shape_array, dtype=np.uint8)
+    
+    return indices, shape_array
