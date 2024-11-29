@@ -227,3 +227,45 @@ def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
         k_vectors[i] = direction_to_focus * k_magnitude
 
     return k_vectors
+
+def crystal_to_detector_pixels_vector(detector_distance, pixel_size, detector_size, wavelength):
+    
+    """
+    Assumes the optical axis is along the z-direction
+    Left handed coordinate system
+    
+    Args: 
+        detector_distance (float): distance from the centre of the crystal to the detector
+        pixel_size (tuple): (x,y) size of the crystal (um)
+        detector_size (tuple): (x,y) size of the crystal (m)
+        wavelength (float): wavelength in Angstroms
+        
+    Returns:
+        The outgoing wavevectors to every detector pixel
+    """
+    
+    pixel_size = np.array(pixel_size) * 1e-6
+    detector_distance = np.array(detector_distance)
+    
+    # number of pixels on the detector in each dimension
+    nx,ny = np.floor(detector_size / pixel_size)
+    
+    x = np.arange(nx) - nx/2 + 0.5
+    y = np.arange(ny) - ny/2 + 0.5
+    
+    x*= pixel_size[0]
+    y*= pixel_size[1]
+    
+    xx,yy = np.meshgrid(x,y)
+    
+    zz = np.full(xx.shape, detector_distance)
+    
+    pixel_vectors = np.stack([xx, yy, zz], axis=1).reshape(-1,3) # this would be the real space vector
+    
+    unit_vectors = pixel_vectors/np.linalg.norm(pixel_vectors, axis = 1)[:,np.newaxis]
+    
+    k = 2*np.pi /wavelength
+    
+    k_out = k*unit_vectors
+    
+    return k_out

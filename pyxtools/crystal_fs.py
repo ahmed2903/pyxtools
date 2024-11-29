@@ -192,3 +192,74 @@ def set_shape_array(arraysize, normals):
     shape_array = np.ascontiguousarray(shape_array, dtype=np.uint8)
     
     return indices, shape_array
+
+def cuboid_normals(arraysize):
+    Nx, Ny, Nz = arraysize
+
+    # Define scaled bounds (positive coordinates)
+    x_min, x_max = 0, Nx
+    y_min, y_max = 0, Ny
+    z_min, z_max = 0, Nz
+
+    # Define the six faces of the cuboid
+    normals = [
+        [x_min, y_min, z_max, x_max, y_max, z_max],  # Front face
+        [x_min, y_min, z_min, x_max, y_max, z_min],  # Back face
+        [x_min, y_min, z_min, x_min, y_max, z_max],  # Left face
+        [x_max, y_min, z_min, x_max, y_max, z_max],  # Right face
+        [x_min, y_max, z_min, x_max, y_max, z_max],  # Top face
+        [x_min, y_min, z_min, x_max, y_min, z_max],  # Bottom face
+    ]
+    return normals
+
+def hexagonal_prism_normals(arraysize):
+    Nx, Ny, Nz = arraysize
+
+    # Scale radius and height
+    r = min(Nx, Ny) / 4  # Radius is a quarter of the smallest dimension
+    h = Nz / 2           # Height spans half the z-dimension
+
+    # Offset for positive coordinates
+    offset = np.array([Nx / 2, Ny / 2, Nz / 2])
+
+    # Hexagon vertices in the XY plane
+    vertices = [
+        offset + [r * np.cos(np.pi / 3 * i), r * np.sin(np.pi / 3 * i), 0]
+        for i in range(6)
+    ]
+
+    # Bottom and top bases
+    bottom_base = [[*v, offset[2] - h, *v, offset[2] - h] for v in vertices]
+    top_base = [[*v, offset[2] + h, *v, offset[2] + h] for v in vertices]
+
+    # Side faces connecting top and bottom vertices
+    sides = [
+        [*vertices[i], offset[2] - h, *vertices[(i + 1) % 6], offset[2] + h]
+        for i in range(6)
+    ]
+
+    # Combine all faces
+    normals = bottom_base + top_base + sides
+    return normals
+
+def pyramid_normals(arraysize):
+    Nx, Ny, Nz = arraysize
+
+    # Offset for positive coordinates
+    offset = np.array([Nx / 2, Ny / 2, Nz / 2])
+
+    # Scaled bounds (positive coordinates)
+    x_min, x_max = offset[0] - Nx / 4, offset[0] + Nx / 4
+    y_min, y_max = offset[1] - Ny / 4, offset[1] + Ny / 4
+    z_apex = offset[2] + Nz / 2  # Apex at the top
+
+    # Define base and four triangular faces
+    normals = [
+        [x_min, y_min, offset[2], x_max, y_min, offset[2]],  # Bottom base (front edge)
+        [x_min, y_max, offset[2], x_max, y_max, offset[2]],  # Bottom base (back edge)
+        [x_min, y_min, offset[2], offset[0], offset[1], z_apex],  # Left triangular face
+        [x_max, y_min, offset[2], offset[0], offset[1], z_apex],  # Right triangular face
+        [x_min, y_max, offset[2], offset[0], offset[1], z_apex],  # Back left triangular face
+        [x_max, y_max, offset[2], offset[0], offset[1], z_apex],  # Back right triangular face
+    ]
+    return normals
