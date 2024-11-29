@@ -8,6 +8,7 @@ import itertools as it
 from . import utils as ut
 from . import atom_info as af
 
+
 def energy2wavelength_a(energy_kev: float) -> float:
     """
     Converts energy in keV to wavelength in A
@@ -182,4 +183,47 @@ def calculate_scattering_amplitude(real_lattice_vecs, q_vec, R_i, atoms, rj_atom
     
     return scattering_amp
     
-    
+def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
+    """
+    Generate an array of incoming k-vectors (incident wave vectors)
+
+    Parameters:
+    - NA: Numerical aperture (NA)
+    - focal_length: Focal length of the lens (mm)
+    - num_vectors: Number of k-vectors to generate (default = 100)
+
+    Returns:
+    - Array of incoming k-vectors (shape: [num_vectors, 3])
+    """
+    # Calculate the maximum scattering angle from the numerical aperture
+    theta_max = np.arcsin(NA)
+
+    # Generate random directions within the cone defined by the NA
+    phi = np.random.uniform(0, 2 * np.pi, num_vectors)  # Random azimuthal angle (0 to 2*pi)
+    theta = np.random.uniform(0, theta_max, num_vectors)  # Random polar angle (0 to theta_max)
+
+    # Convert spherical coordinates to Cartesian coordinates for the k-vectors
+    k_vectors = np.zeros((num_vectors, 3))
+    k_vectors[:, 0] = np.sin(theta) * np.cos(phi)  # x component
+    k_vectors[:, 1] = np.sin(theta) * np.sin(phi)  # y component
+    k_vectors[:, 2] = np.cos(theta)  # z component
+
+    # Normalize to have unit length (magnitude of k-vector should be 2*pi / wavelength)
+    k_magnitude = 2 * np.pi / wavelength
+    k_vectors *= k_magnitude
+
+    # Converging effect: adjust directions to point towards the focal point
+    # For simplicity, let's assume the focal point lies along the z-axis and the beam converges to (0, 0, focal_length)
+    # The beam is converging toward (0, 0, focal_length)
+    focal_point = np.array([0, 0, focal_length])
+
+    # Normalize each vector to point towards the focal point
+    for i in range(num_vectors):
+        # Direction vector from the k-vector's point to the focal point
+        direction_to_focus = focal_point - k_vectors[i]
+        # Normalize this direction
+        direction_to_focus /= np.linalg.norm(direction_to_focus)
+        # Update k-vector direction (the normalized vector)
+        k_vectors[i] = direction_to_focus * k_magnitude
+
+    return k_vectors
