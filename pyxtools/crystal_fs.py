@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy
 import pandas as pd
-from math import sin, cos, pi
+from math import sin, cos, pi, sqrt
 import itertools as it
 
 def calc_realspace_lattice_vectors(uc_size, uc_angles) -> np.ndarray:
@@ -173,10 +173,12 @@ def set_shape_array(arraysize, normals):
     # Initialize the shape array
     shape_array = np.zeros(arraysize, dtype=np.uint8)  # Binary array to represent shape (0 or 1)
     n_voxels = np.prod(arraysize)
+    
+    print(len(normals))
 
     # Generate 3D grid indices for the shape array
     indices = np.transpose(np.unravel_index(np.arange(n_voxels), arraysize))
-
+    
     # Process each surface defined by normals
     for surface in normals:
         start = np.array(surface[:3])  # Start coordinates
@@ -186,7 +188,10 @@ def set_shape_array(arraysize, normals):
 
         # Determine which points lie "inside" the surface
         inside = np.dot(indices - start, normal) < 0
-        shape_array[inside] = 1  # Mark voxels inside the shape as 1
+    
+        
+        shape_array[tuple(indices[inside].T)] = 1
+        #flat_shape_array[inside] = 1  # Mark voxels inside the shape as 1s
 
     # Store the shape array
     shape_array = np.ascontiguousarray(shape_array, dtype=np.uint8)
@@ -194,72 +199,25 @@ def set_shape_array(arraysize, normals):
     return indices, shape_array
 
 def cuboid_normals(arraysize):
-    Nx, Ny, Nz = arraysize
-
-    # Define scaled bounds (positive coordinates)
-    x_min, x_max = 0, Nx
-    y_min, y_max = 0, Ny
-    z_min, z_max = 0, Nz
-
-    # Define the six faces of the cuboid
+    
+    X=350
+    Y=350
+    Z=450
+    dX = 30
+    X2=X/2 - dX
+    Y2=Y/2 - dX
+    Z2=Z/2 - dX
+    s3 = sqrt(3)
+    
     normals = [
-        [x_min, y_min, z_max, x_max, y_max, z_max],  # Front face
-        [x_min, y_min, z_min, x_max, y_max, z_min],  # Back face
-        [x_min, y_min, z_min, x_min, y_max, z_max],  # Left face
-        [x_max, y_min, z_min, x_max, y_max, z_max],  # Right face
-        [x_min, y_max, z_min, x_max, y_max, z_max],  # Top face
-        [x_min, y_min, z_min, x_max, y_min, z_max],  # Bottom face
+    [dX,Y2,Z2,dX-1,Y2,Z2],\
+    [X-dX,Y2,Z2,X,Y2,Z2],\
+    [X2/2+X/2,s3*Y2/2+Y/2,Z2,X2/1.9+X/2,s3*Y2/1.9+Y/2,Z2],\
+    [X2/2+X/2,-s3*Y2/2+Y/2,Z2,X2/1.9+X/2,-s3*Y2/1.9+Y/2,Z2],\
+    [-X2/2+X/2,s3*Y2/2+Y/2,Z2,-X2/1.9+X/2,s3*Y2/1.9+Y/2,Z2],\
+    [-X2/2+X/2,-s3*Y2/2+Y/2,Z2,-X2/1.9+X/2,-s3*Y2/1.9+Y/2,Z2],\
+    [X2,Y2,dX,X2,Y2,dX-1],\
+    [X2,Y2,Z-dX,X2,Y2,Z]
     ]
-    return normals
-
-def hexagonal_prism_normals(arraysize):
-    Nx, Ny, Nz = arraysize
-
-    # Scale radius and height
-    r = min(Nx, Ny) / 4  # Radius is a quarter of the smallest dimension
-    h = Nz / 2           # Height spans half the z-dimension
-
-    # Offset for positive coordinates
-    offset = np.array([Nx / 2, Ny / 2, Nz / 2])
-
-    # Hexagon vertices in the XY plane
-    vertices = [
-        offset + [r * np.cos(np.pi / 3 * i), r * np.sin(np.pi / 3 * i), 0]
-        for i in range(6)
-    ]
-
-    # Bottom and top bases
-    bottom_base = [[*v, offset[2] - h, *v, offset[2] - h] for v in vertices]
-    top_base = [[*v, offset[2] + h, *v, offset[2] + h] for v in vertices]
-
-    # Side faces connecting top and bottom vertices
-    sides = [
-        [*vertices[i], offset[2] - h, *vertices[(i + 1) % 6], offset[2] + h]
-        for i in range(6)
-    ]
-
-    # Combine all faces
-    normals = bottom_base + top_base + sides
-    return normals
-
-def pyramid_normals(arraysize):
-    Nx, Ny, Nz = arraysize
-
-    # Offset for positive coordinates
-    offset = np.array([Nx / 2, Ny / 2, Nz / 2])
-
-    # Scaled bounds (positive coordinates)
-    x_min, x_max = offset[0] - Nx / 4, offset[0] + Nx / 4
-    y_min, y_max = offset[1] - Ny / 4, offset[1] + Ny / 4
-    z_apex = offset[2] + Nz / 2  # Apex at the top
-
-    # Define base and four triangular faces
-    normals = [
-        [x_min, y_min, offset[2], x_max, y_min, offset[2]],  # Bottom base (front edge)
-        [x_min, y_max, offset[2], x_max, y_max, offset[2]],  # Bottom base (back edge)
-        [x_min, y_min, offset[2], offset[0], offset[1], z_apex],  # Left triangular face
-        [x_max, y_min, offset[2], offset[0], offset[1], z_apex],  # Right triangular face
-        [x_min, y_max, offset[2], offset[0], offset[1], z_apex],  # Back left triangular face
-        [x_max, y_max, offset[2], offset[0], offset[1], z_apex],  # Back right triangular face
-    ]
+    
     return normals
