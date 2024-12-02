@@ -78,25 +78,6 @@ def CalcQ(delta):
     Q_vec = k_f - k_i
     
     return Q_vec
-
-
-def FullOp(chi, mu, eta, phi, delta):
-          
-    Q_vec = CalcQ(delta)
-    
-        
-    inv_mat = InvStanRotMat(-chi, -mu, -eta, -phi)
-    
-    
-    Q1 = np.dot(inv_mat, Q_vec)
-    
-
-    Q1 /= np.linalg.norm(Q1)
-    
-    Q1 *= 2*np.pi / (lambda_m(9)*1e9) 
-    
-    return Q1
-    
     
     
 def rotation_matrix(axis, num):
