@@ -194,7 +194,7 @@ def calculate_scattering_amplitude(real_lattice_vecs, q_vec, R_i, atoms, rj_atom
     print("structure_factor: done")
     scattering_amp = form_factor*structure_factor
     
-    return scattering_amp
+    return structure_factor
 
 def calculate_intensity(scat_amp):
     
@@ -226,7 +226,7 @@ def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
     k_vectors[:, 2] = np.cos(theta)  # z component
 
     # Normalize to have unit length (magnitude of k-vector should be 2*pi / wavelength)
-    k_magnitude = 1.0 / wavelength
+    k_magnitude = 2.0*pi / wavelength
     k_vectors *= k_magnitude
 
     # Converging effect: adjust directions to point towards the focal point
@@ -281,7 +281,7 @@ def crystal_to_detector_pixels_vector(detector_distance, pixel_size, detector_si
     
     unit_vectors = pixel_vectors/np.linalg.norm(pixel_vectors, axis = 1)[:,np.newaxis]
     
-    k = 1.0 /wavelength
+    k = 2.0*pi /wavelength
     
     k_out = k*unit_vectors
     
@@ -406,3 +406,5 @@ def reverse_kouts_to_pixels(kouts, detector_size, pixel_size, detector_distance)
         y_pixel_indices = np.clip(y_pixel_indices, 0, ny - 1)
         
     return np.vstack((y_pixel_indices, x_pixel_indices)).T
+
+
