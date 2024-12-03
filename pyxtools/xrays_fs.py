@@ -4,6 +4,7 @@ import scipy
 import pandas as pd
 from math import sin, cos, pi
 import itertools as it
+from multiprocessing import Pool, cpu_count
 
 from . import utils as ut
 from . import atom_info as af
@@ -87,7 +88,7 @@ def calculate_atomic_formfactor(atom: str, qvec: np.ndarray, wavelength_a: float
     Calculates the atomic form factor for a given Q vector and wavelength.
 
     """
-    theta = qmag2ttheta(np.linalg.norm(qvec, axis=-1), wavelength_a)
+    theta = qmag2ttheta(np.linalg.norm(qvec, axis=-1), wavelength_a= wavelength_a)
 
     s = np.sin(theta ) / (wavelength_a)
 
@@ -127,8 +128,9 @@ def calculate_form_factor(real_lattice_vecs, q_vec, R_i):
     
     # Volume of unit cell
     V_cell = np.dot(real_lattice_vecs[0], np.cross(real_lattice_vecs[1], real_lattice_vecs[2])) 
-    
-    f_q = 2*pi * np.sum(np.exp(-1j*np.dot(q_vec,R_i)), axis = -1) / V_cell 
+    print(q_vec.shape)
+    print(R_i.shape)
+    f_q = 2*pi * np.sum(np.exp(-1j*np.dot(q_vec,R_i.T)), axis = -1) / V_cell 
     
     return f_q
 
@@ -152,9 +154,17 @@ def calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a):
     for atom in atoms:
         fj = calculate_atomic_formfactor(atom, q_vec, wavelength_a)
         fjs.append(fj)
+        
+    print("atomic form factor done")
+    
     fjs = np.array(fjs)
     
+    print(fjs.shape)
+    print(rj.shape)
+    print("computing phase")
     phase = np.exp(-1j*np.dot(q_vec,rj.T))
+    print("summing structure factor")
+    
     s_q = np.sum(fjs*phase, axis = 1)
     
     return s_q
@@ -176,12 +186,19 @@ def calculate_scattering_amplitude(real_lattice_vecs, q_vec, R_i, atoms, rj_atom
     Returns:
         np.ndarray: the scattering amplitude
     """
+    print("computing form factor")
     form_factor = calculate_form_factor(real_lattice_vecs, q_vec, R_i)
+    print("form factor done")
+    print("computing structure factor")
     structure_factor = calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a)
-    
+    print("structure_factor: done")
     scattering_amp = form_factor*structure_factor
     
     return scattering_amp
+
+def calculate_intensity(scat_amp):
+    
+    return np.abs(scat_amp)**2
     
 def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
     """
@@ -209,7 +226,7 @@ def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
     k_vectors[:, 2] = np.cos(theta)  # z component
 
     # Normalize to have unit length (magnitude of k-vector should be 2*pi / wavelength)
-    k_magnitude = 2 * np.pi / wavelength
+    k_magnitude = 1.0 / wavelength
     k_vectors *= k_magnitude
 
     # Converging effect: adjust directions to point towards the focal point
@@ -217,14 +234,14 @@ def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
     # The beam is converging toward (0, 0, focal_length)
     focal_point = np.array([0, 0, focal_length])
 
-    # Normalize each vector to point towards the focal point
-    for i in range(num_vectors):
-        # Direction vector from the k-vector's point to the focal point
-        direction_to_focus = focal_point - k_vectors[i]
-        # Normalize this direction
-        direction_to_focus /= np.linalg.norm(direction_to_focus)
-        # Update k-vector direction (the normalized vector)
-        k_vectors[i] = direction_to_focus * k_magnitude
+    # # Normalize each vector to point towards the focal point
+    # for i in range(num_vectors):
+    #     # Direction vector from the k-vector's point to the focal point
+    #     direction_to_focus = focal_point - k_vectors[i]
+    #     # Normalize this direction
+    #     direction_to_focus /= np.linalg.norm(direction_to_focus)
+    #     # Update k-vector direction (the normalized vector)
+    #     k_vectors[i] = direction_to_focus * k_magnitude
 
     return k_vectors
 
@@ -249,7 +266,7 @@ def crystal_to_detector_pixels_vector(detector_distance, pixel_size, detector_si
     
     # number of pixels on the detector in each dimension
     nx,ny = np.floor(detector_size / pixel_size)
-    
+
     x = np.arange(nx) - nx/2 + 0.5
     y = np.arange(ny) - ny/2 + 0.5
     
@@ -260,12 +277,132 @@ def crystal_to_detector_pixels_vector(detector_distance, pixel_size, detector_si
     
     zz = np.full(xx.shape, detector_distance)
     
-    pixel_vectors = np.stack([xx, yy, zz], axis=1).reshape(-1,3) # this would be the real space vector
+    pixel_vectors = np.stack([xx, yy, zz], axis=2).reshape(-1,3) # this would be the real space vector
     
     unit_vectors = pixel_vectors/np.linalg.norm(pixel_vectors, axis = 1)[:,np.newaxis]
     
-    k = 2*np.pi /wavelength
+    k = 1.0 /wavelength
     
     k_out = k*unit_vectors
     
+    print(f" ratio: {detector_distance/unit_vectors[:,2]}")
+    
     return k_out
+
+def gen_Qvectors_from_kins_kouts(kins, kouts):
+    """
+    Given two arrays kins and kouts, this function generates all possible Q vectors 
+    along with the indices of their corresponding k_out and k_in.
+
+    Args:
+        kins (np.ndarray): The k_in's of the experiment (shape: N, 3)
+        kouts (np.ndarray): The k_out's of the experiment (shape: M, 3)
+
+    Returns:
+        difference_vectors (np.ndarray): All Q-vectors (shape: N*M, 3)
+        k_out_indices (np.ndarray): Indices of k_out corresponding to each Q-vector (shape: N*M,)
+        k_in_indices (np.ndarray): Indices of k_in corresponding to each Q-vector (shape: N*M,)
+    """
+
+    # Compute the difference vectors for each combination
+    difference_vectors = kouts[:, np.newaxis, :] - kins[np.newaxis, :, :]
+
+    # Reshape the result to (N*M, 3)
+    difference_vectors = difference_vectors.reshape(-1, 3)
+
+    # Generate indices
+    num_kouts, num_kins = len(kouts), len(kins)
+    k_out_indices = np.repeat(np.arange(num_kouts), num_kins) # Repeat each k_out index num_kins times
+    k_in_indices = np.repeat(np.arange(num_kins), num_kouts)
+    
+    k_out = kouts[k_out_indices]
+    k_in = kins[k_in_indices]
+    print(f"k_out shape is: {k_out.shape}")
+    
+    return difference_vectors, k_out, k_in
+
+
+def generate_detector_image(intensities, indices, detector_size, pixel_size):
+    """
+    Generate a 2D detector image based on scattering intensities and kouts, accounting for distance R.
+
+    Args:
+        intensities (np.ndarray): Array of corresponding scattering intensities (N,).
+        indices: indices of the intensities on the detector 
+        detector_size (tuple): Detector dimensions in meters (width, height).
+        pixel_size (tuple): Pixel size in micrometers (width, height).
+    Returns:
+        np.ndarray: 2D detector image with intensities.
+    """
+    
+    # Convert pixel size to meters
+    pixel_size = np.array(pixel_size) * 1e-6
+    
+    # Compute number of pixels in each dimension
+    nx, ny = (detector_size / pixel_size).astype(int)
+    
+    detector_image = np.zeros((nx,ny))
+
+    # Clip indices to ensure they lie within the detector bounds
+    #x_pixel_indices = np.clip(x_pixel_indices, 0, nx - 1)
+    #y_pixel_indices = np.clip(y_pixel_indices, 0, ny - 1)
+
+    print(f"scat:amp: {intensities.shape}")
+    print(f"detector_image: {detector_image.shape}")
+    # Populate the image array with intensities
+    
+    
+    for i in range(len(intensities)):
+        detector_image[indices[i,0], indices[i,1]] += intensities[i]
+
+    return detector_image
+
+
+def reverse_kouts_to_pixels(kouts, detector_size, pixel_size, detector_distance):
+    """
+    Reverse map k_out vectors to detector pixel indices.
+
+    Args:
+        kouts (np.ndarray): Array of k_out vectors (N, 3), normalized.
+        detector_size (tuple): Detector dimensions in meters (width, height).
+        pixel_size (tuple): Pixel size in micrometers (width, height).
+        detector_distance (float): Distance from the crystal to the center of the detector in meters.
+
+    Returns:
+        np.ndarray: Array of pixel indices for k_out vectors.
+    """
+    #kouts = kouts/np.linalg.norm(kouts, axis = 1)[:,np.newaxis]
+    print(kouts)
+    
+    # Convert pixel size to meters
+    pixel_size = np.array(pixel_size) * 1e-6
+    
+    # Compute number of pixels in each dimension
+    nx, ny = (detector_size / pixel_size).astype(int)
+
+    print(nx,ny)
+    
+    # Reverse mapping to pixel indices
+    x_pixels = (kouts[:, 0] / kouts[:, 2]) * detector_distance / pixel_size[0] + nx / 2
+    y_pixels = (kouts[:, 1] / kouts[:, 2]) * detector_distance / pixel_size[1] + ny / 2
+
+
+    
+    # Convert to integer pixel indices using rounding
+    x_pixel_indices = np.floor(x_pixels).astype(int)
+    y_pixel_indices = np.floor(y_pixels).astype(int)
+
+    print(x_pixel_indices.max())
+    print(x_pixels)
+    
+    # Verify indices are within bounds
+    # Clip indices and log out-of-bounds
+    out_of_bounds = (x_pixel_indices < 0) | (x_pixel_indices >= nx) | \
+                    (y_pixel_indices < 0) | (y_pixel_indices >= ny)
+
+    if np.any(out_of_bounds):
+        print(f"Clipping {np.sum(out_of_bounds)} out-of-bounds indices.")
+        x_pixel_indices = np.clip(x_pixel_indices, 0, nx - 1)
+        y_pixel_indices = np.clip(y_pixel_indices, 0, ny - 1)
+        
+    return np.vstack((y_pixel_indices, x_pixel_indices)).T
