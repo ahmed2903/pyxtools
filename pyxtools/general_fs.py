@@ -428,3 +428,58 @@ def FitToGaussian(arr):
     popt, _ = curve_fit(_gaussian, xdata, arr.ravel(), initial_guess)
 
     return popt
+
+def find_aligned_indices(arr1, arr2, tolerance=1e-5):
+    
+    """
+    Finds the aligned indices between two arrays
+    """
+    
+    arr1 = arr1 / np.linalg.norm(arr1, axis=1)[:,np.newaxis]
+    arr2 = arr2 / np.linalg.norm(arr2, axis=1)[:,np.newaxis]
+    
+    dot_products = np.dot(arr2, arr1.T)
+    
+    aligned_indice= np.where(np.abs(dot_products-1)< tolerance)
+    
+    return aligned_indice[0]
+
+def find_aligned_indices2(G_arr, Q_arr, angle_tolerance=0.01, magnitude_tolerance=0.05):
+    """
+    Find indices in Q_arr that align with vectors in G_arr, considering both direction and magnitude.
+
+    Parameters:
+    - G_arr (ndarray): Array of reference vectors (shape: N x 3).
+    - Q_arr (ndarray): Array of test vectors (shape: M x 3).
+    - angle_tolerance (float): Maximum cosine similarity deviation for alignment.
+    - magnitude_tolerance (float): Maximum relative difference in magnitudes for alignment.
+
+    Returns:
+    - aligned_Q_indices (ndarray): Indices in Q_arr that align with vectors in G_arr.
+    """
+    # Compute magnitudes of G_arr and Q_arr
+    G_magnitudes = np.linalg.norm(G_arr, axis=1)
+    Q_magnitudes = np.linalg.norm(Q_arr, axis=1)
+
+    # Normalize the vectors for direction comparison
+    G_normalized = G_arr / G_magnitudes[:, None]
+    Q_normalized = Q_arr / Q_magnitudes[:, None]
+
+    # Pairwise cosine similarity (dot product of normalized vectors)
+    cosine_similarity = np.dot(Q_normalized, G_normalized.T)
+
+    # Pairwise magnitude ratio
+    magnitude_ratios = Q_magnitudes / G_magnitudes
+
+    # Conditions for alignment
+    direction_condition = np.abs(cosine_similarity - 1) <= angle_tolerance  # Aligned directions
+    magnitude_condition = np.abs(magnitude_ratios - 1) <= magnitude_tolerance  # Similar magnitudes
+
+    # Combine both conditions
+    alignment_condition = direction_condition & magnitude_condition
+
+    # Find indices in Q_arr that align with any vector in G_arr
+    aligned_indices = np.where(alignment_condition)
+    aligned_Q_indices = np.unique(aligned_indices[0])  # Indices in Q_arr that align
+
+    return aligned_Q_indices
