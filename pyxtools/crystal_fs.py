@@ -127,10 +127,11 @@ def generate_recip_lattice_points(recpspaceVecs: np.ndarray, max_hkl: int) -> np
                 if h!=0 and k!=0 and l!=0:
                     H = h * recpspaceVecs[0] + k * recpspaceVecs[1] + l * recpspaceVecs[2]
                     H_hkl.append(H)
-
+    
     H_hkl = np.array(H_hkl)
 
     return H_hkl
+
 
 def generate_realspace_lattice_points(N_ucs: int, realspaceVecs: np.ndarray) -> np.ndarray:
     """
