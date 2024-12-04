@@ -236,10 +236,6 @@ def pcc_loss(exp, recons):
     
     return pcc
 
-
-
-
-
 def TransposeArray(array):
     
     array2 = array.transpose((2,1,0))
@@ -444,42 +440,75 @@ def find_aligned_indices(arr1, arr2, tolerance=1e-5):
     
     return aligned_indice[0]
 
-def find_aligned_indices2(G_arr, Q_arr, angle_tolerance=0.01, magnitude_tolerance=0.05):
+def filter_vectors_by_direction(arr, kins, direction, max_angle):
     """
-    Find indices in Q_arr that align with vectors in G_arr, considering both direction and magnitude.
+    Takes an array of vector (N,3) and filters them such that they are all pointing in one direction
+    also takes the corresponding array
+    
+    Adds anoter constraint of maximum angular spread of the vectors 
+    such that the vectors are pointing in a cone
+    
+    Args:
+    arr (np.ndarray): array of vectors N,3
+    arr (np.ndarray): corresponding array of vectors N,3
 
-    Parameters:
-    - G_arr (ndarray): Array of reference vectors (shape: N x 3).
-    - Q_arr (ndarray): Array of test vectors (shape: M x 3).
-    - angle_tolerance (float): Maximum cosine similarity deviation for alignment.
-    - magnitude_tolerance (float): Maximum relative difference in magnitudes for alignment.
-
-    Returns:
-    - aligned_Q_indices (ndarray): Indices in Q_arr that align with vectors in G_arr.
+    direction (np.ndarray): principle direction
+    max_angle (float): [radians] angle of cone with the direction vector  
     """
-    # Compute magnitudes of G_arr and Q_arr
-    G_magnitudes = np.linalg.norm(G_arr, axis=1)
-    Q_magnitudes = np.linalg.norm(Q_arr, axis=1)
+    
+    direction /= np.linalg.norm(direction)
+    
+    cos_max_angle = math.cos(max_angle)
+        
+    cos_vectors = np.dot(arr, direction)  / np.linalg.norm(arr, axis = 1)
+    
+    arr = arr[cos_vectors>= cos_max_angle]
+    kins = kins[cos_vectors>= cos_max_angle]
+    
+    return arr, kins
 
-    # Normalize the vectors for direction comparison
-    G_normalized = G_arr / G_magnitudes[:, None]
-    Q_normalized = Q_arr / Q_magnitudes[:, None]
+def filter_elastic_scatt(kouts, kins, tolerance):
+    """
+    
+    Filters the kouts and kins to consider only when:
+    |kout| = |kin| +/- 1e-4
 
-    # Pairwise cosine similarity (dot product of normalized vectors)
-    cosine_similarity = np.dot(Q_normalized, G_normalized.T)
+    Args:
+        kouts (_type_): _description_
+        kins (_type_): _description_
+    """
+    
+    # Compute the magnitudes of kin and kout
+    kin_magnitudes = np.linalg.norm(kins, axis=1)  # Magnitudes of kin (N,)
+    kout_magnitudes = np.linalg.norm(kouts, axis=1)  # Magnitudes of kout (M*N,)
+    
+    # Create a mask for filtering based on the magnitude condition
+    magnitude_diff = np.abs(kin_magnitudes - kout_magnitudes)
+    mask = magnitude_diff < tolerance
+    
+    # Apply the mask to get the filtered kin and kout pairs
+    filtered_kin = kins[mask]
+    filtered_kout = kouts[mask]
+    
+    return filtered_kout, filtered_kin
+    
+def calc_detector_max_angle(detector_size, detector_distance):
+    
+    """
+    Calculates the maximum angle that a detector can capture.
+    
+    Detector is assumed to be centralised, such that centre of the detector is along the optical axis
+    
+    Returns: max angle [radians]
+    """
+    
+    sx, sy = detector_size[0]/2, detector_size[1]/2
+    
+    det_max_path = np.array([sx,sy,detector_distance])
+    
+    det_max_path /= np.linalg.norm(det_max_path)
+    
+    max_angle = math.acos(np.dot(det_max_path, np.array([0,0,1])))
+    
+    return max_angle
 
-    # Pairwise magnitude ratio
-    magnitude_ratios = Q_magnitudes / G_magnitudes
-
-    # Conditions for alignment
-    direction_condition = np.abs(cosine_similarity - 1) <= angle_tolerance  # Aligned directions
-    magnitude_condition = np.abs(magnitude_ratios - 1) <= magnitude_tolerance  # Similar magnitudes
-
-    # Combine both conditions
-    alignment_condition = direction_condition & magnitude_condition
-
-    # Find indices in Q_arr that align with any vector in G_arr
-    aligned_indices = np.where(alignment_condition)
-    aligned_Q_indices = np.unique(aligned_indices[0])  # Indices in Q_arr that align
-
-    return aligned_Q_indices

@@ -163,9 +163,10 @@ def calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a):
     print(rj.shape)
     print("computing phase")
     phase = np.exp(-1j*np.dot(q_vec,rj.T))
+    print(phase.shape)
     print("summing structure factor")
-    
-    s_q = np.sum(fjs*phase, axis = 1)
+ 
+    s_q = np.sum(fjs.T*phase, axis = 1)
     
     return s_q
 
@@ -194,7 +195,7 @@ def calculate_scattering_amplitude(real_lattice_vecs, q_vec, R_i, atoms, rj_atom
     print("structure_factor: done")
     scattering_amp = form_factor*structure_factor
     
-    return structure_factor
+    return scattering_amp
 
 def calculate_intensity(scat_amp):
     
@@ -284,9 +285,7 @@ def crystal_to_detector_pixels_vector(detector_distance, pixel_size, detector_si
     k = 2.0*pi /wavelength
     
     k_out = k*unit_vectors
-    
-    print(f" ratio: {detector_distance/unit_vectors[:,2]}")
-    
+        
     return k_out
 
 def gen_Qvectors_from_kins_kouts(kins, kouts):
@@ -313,16 +312,15 @@ def gen_Qvectors_from_kins_kouts(kins, kouts):
     # Generate indices
     num_kouts, num_kins = len(kouts), len(kins)
     k_out_indices = np.repeat(np.arange(num_kouts), num_kins) # Repeat each k_out index num_kins times
-    k_in_indices = np.repeat(np.arange(num_kins), num_kouts)
+    k_in_indices = np.tile(np.arange(num_kins), num_kouts)
     
     k_out = kouts[k_out_indices]
     k_in = kins[k_in_indices]
-    print(f"k_out shape is: {k_out.shape}")
     
     return difference_vectors, k_out, k_in
 
 
-def generate_detector_image(intensities, indices, detector_size, pixel_size):
+def generate_detector_image(intensities, kouts, detector_size, pixel_size, distance):
     """
     Generate a 2D detector image based on scattering intensities and kouts, accounting for distance R.
 
@@ -334,31 +332,24 @@ def generate_detector_image(intensities, indices, detector_size, pixel_size):
     Returns:
         np.ndarray: 2D detector image with intensities.
     """
+    indices, intensities = reverse_kouts_to_pixels(kouts, intensities, detector_size, pixel_size, distance)
     
     # Convert pixel size to meters
     pixel_size = np.array(pixel_size) * 1e-6
     
     # Compute number of pixels in each dimension
     nx, ny = (detector_size / pixel_size).astype(int)
-    
+
     detector_image = np.zeros((nx,ny))
 
-    # Clip indices to ensure they lie within the detector bounds
-    #x_pixel_indices = np.clip(x_pixel_indices, 0, nx - 1)
-    #y_pixel_indices = np.clip(y_pixel_indices, 0, ny - 1)
-
-    print(f"scat:amp: {intensities.shape}")
-    print(f"detector_image: {detector_image.shape}")
     # Populate the image array with intensities
-    
-    
     for i in range(len(intensities)):
         detector_image[indices[i,0], indices[i,1]] += intensities[i]
 
     return detector_image
 
 
-def reverse_kouts_to_pixels(kouts, detector_size, pixel_size, detector_distance):
+def reverse_kouts_to_pixels(kouts, intensiies, detector_size, pixel_size, detector_distance):
     """
     Reverse map k_out vectors to detector pixel indices.
 
@@ -371,8 +362,6 @@ def reverse_kouts_to_pixels(kouts, detector_size, pixel_size, detector_distance)
     Returns:
         np.ndarray: Array of pixel indices for k_out vectors.
     """
-    #kouts = kouts/np.linalg.norm(kouts, axis = 1)[:,np.newaxis]
-    print(kouts)
     
     # Convert pixel size to meters
     pixel_size = np.array(pixel_size) * 1e-6
@@ -380,8 +369,6 @@ def reverse_kouts_to_pixels(kouts, detector_size, pixel_size, detector_distance)
     # Compute number of pixels in each dimension
     nx, ny = (detector_size / pixel_size).astype(int)
 
-    print(nx,ny)
-    
     # Reverse mapping to pixel indices
     x_pixels = (kouts[:, 0] / kouts[:, 2]) * detector_distance / pixel_size[0] + nx / 2
     y_pixels = (kouts[:, 1] / kouts[:, 2]) * detector_distance / pixel_size[1] + ny / 2
@@ -392,19 +379,42 @@ def reverse_kouts_to_pixels(kouts, detector_size, pixel_size, detector_distance)
     x_pixel_indices = np.floor(x_pixels).astype(int)
     y_pixel_indices = np.floor(y_pixels).astype(int)
 
-    print(x_pixel_indices.max())
-    print(x_pixels)
-    
     # Verify indices are within bounds
     # Clip indices and log out-of-bounds
     out_of_bounds = (x_pixel_indices < 0) | (x_pixel_indices >= nx) | \
                     (y_pixel_indices < 0) | (y_pixel_indices >= ny)
+                    
+    in_bounds_mask = (x_pixel_indices >= 0) & (x_pixel_indices < nx) & \
+                (y_pixel_indices >= 0) & (y_pixel_indices < ny)
 
-    if np.any(out_of_bounds):
-        print(f"Clipping {np.sum(out_of_bounds)} out-of-bounds indices.")
-        x_pixel_indices = np.clip(x_pixel_indices, 0, nx - 1)
-        y_pixel_indices = np.clip(y_pixel_indices, 0, ny - 1)
+    
+    x_pixel_indices = x_pixel_indices[in_bounds_mask]
+    y_pixel_indices = y_pixel_indices[in_bounds_mask]
+    intensiies = intensiies[in_bounds_mask]
+
+
         
-    return np.vstack((y_pixel_indices, x_pixel_indices)).T
+    return np.vstack((y_pixel_indices, x_pixel_indices)).T, intensiies
 
+def compute_kout_from_G_kin(G_arr, kin_arr):
+    """
+    A functiont that computes k_out from the reciprocal lattice vectors, and k_in
+    
+    k_out = k_in + G
+
+    Args:
+        G_arr (np.ndarray): The reciprocal lattice vectors
+        kin_arr (np.ndarray): The incoming wave vectors
+    """
+    
+    
+    k_out = G_arr[:, None, :] + kin_arr[None, :, :]
+    
+    k_out = k_out.reshape(-1,3)
+    
+    # Generate the indices for the kin vectors
+    kin_indices = np.tile(np.arange(len(kin_arr)), len(G_arr))
+    Garr_indices = np.repeat(np.arange(len(G_arr)), len(kin_arr))
+    
+    return k_out, kin_indices, Garr_indices
 
