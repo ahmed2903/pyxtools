@@ -1,9 +1,12 @@
+from turtle import shapetransform
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy
 import pandas as pd
 from math import sin, cos, pi, sqrt
 import itertools as it
+
+from pyxtools.general_fs import pad
 
 def calc_realspace_lattice_vectors(uc_size, uc_angles) -> np.ndarray:
     """
@@ -117,19 +120,19 @@ def generate_recip_lattice_points(recpspaceVecs: np.ndarray, max_hkl: int) -> np
         H_hkl: A numpy array containing a set of reciprocal lattice points. 
     """
     h_range = range(-max_hkl, max_hkl + 1)
-    k_range = range(-max_hkl, max_hkl + 1)
     l_range = range(-max_hkl, max_hkl + 1)
+    k_range = range(-max_hkl, max_hkl + 1)
     H_hkl = []
 
     for h in h_range:
         for k in k_range:
             for l in l_range:
-                if h!=0 and k!=0 and l!=0:
+                if not (h == 0 and k == 0 and l == 0):
                     H = h * recpspaceVecs[0] + k * recpspaceVecs[1] + l * recpspaceVecs[2]
                     H_hkl.append(H)
     
     H_hkl = np.array(H_hkl)
-
+    
     return H_hkl
 
 
@@ -158,6 +161,48 @@ def generate_realspace_lattice_points(N_ucs: int, realspaceVecs: np.ndarray) -> 
                     R_n.append(R)
 
     return np.array(R_n)
+
+
+def gen_RLS_from_maxhkl(max_hkl, grid_points, a, b, c, ravel=False):
+    """
+    Generate reciprocal space q-vectors for a general lattice.
+
+    Parameters:
+        max_hkl (int): Maximum value of h, k, l indices.
+        grid_points (int): Number of grid points along each axis.
+        a, b, c (np.ndarray):(reciprocal-space lattice vectors).
+
+    Returns:
+        q_vectors (numpy.ndarray): Array of shape (grid_points**3, 3)
+                                   containing the q-vectors.
+    """
+    # Reciprocal lattice basis vectors
+    b1 = np.linalg.norm(a)
+    b2 = np.linalg.norm(b)
+    b3 = np.linalg.norm(c)
+    
+
+    print(b1,b2,b3)
+    
+    # Define h, k, l ranges
+    h = np.linspace(-max_hkl, max_hkl, grid_points) 
+    k = np.linspace(-max_hkl, max_hkl, grid_points) 
+    l = np.linspace(-max_hkl, max_hkl, grid_points) 
+
+    # Generate 3D grid of q-space
+    h_grid, k_grid, l_grid = np.meshgrid(h, k, l, indexing="ij")
+    
+    qx = h_grid * b1
+    qy = k_grid * b2
+    qz = l_grid * b3
+
+    if ravel:
+        # Stack into a single array of shape (grid_points**3, 3)
+        q_vectors = np.stack((qx.ravel(), qy.ravel(), qz.ravel()), axis=-1)
+    else: 
+        q_vectors = np.stack((qx, qy, qz), axis=-1)
+
+    return q_vectors
 
 def set_shape_array(arraysize, normals):
     """
@@ -197,13 +242,15 @@ def set_shape_array(arraysize, normals):
     # Store the shape array
     shape_array = np.ascontiguousarray(shape_array, dtype=np.uint8)
     
+    shape_array = pad(shape_array, 2,2,2,2,2,2)
+    
     return indices, shape_array
 
 def cuboid_normals(arraysize):
     
-    X=350
-    Y=350
-    Z=450
+    X=arraysize[0]
+    Y=arraysize[2]
+    Z=arraysize[2]
     dX = 30
     X2=X/2 - dX
     Y2=Y/2 - dX
@@ -222,3 +269,22 @@ def cuboid_normals(arraysize):
     ]
     
     return normals
+
+def compute_shape_transform(shape_array, grid_spacing):
+    
+    shapetransform = np.fft.fftshift(np.fft.fftn(shape_array))
+    
+    # Create the reciprocal space grid
+    nx, ny, nz = shape_array.shape
+    dx, dy, dz = grid_spacing
+
+    # Define the reciprocal grid extents
+    qx = np.fft.fftshift(np.fft.fftfreq(nx, d=dx)) * 2 * np.pi
+    qy = np.fft.fftshift(np.fft.fftfreq(ny, d=dy)) * 2 * np.pi
+    qz = np.fft.fftshift(np.fft.fftfreq(nz, d=dz)) * 2 * np.pi
+    
+    qx, qy, qz = np.meshgrid(qx, qy, qz, indexing='ij')
+
+    return shapetransform, (qx, qy, qz)
+
+
