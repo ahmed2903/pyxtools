@@ -128,8 +128,7 @@ def calculate_form_factor(real_lattice_vecs, q_vec, R_i):
     
     # Volume of unit cell
     V_cell = np.dot(real_lattice_vecs[0], np.cross(real_lattice_vecs[1], real_lattice_vecs[2])) 
-    print(q_vec.shape)
-    print(R_i.shape)
+
     f_q = 2*pi * np.sum(np.exp(-1j*np.dot(q_vec,R_i.T)), axis = -1) / V_cell 
     
     return f_q
@@ -227,6 +226,7 @@ def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
     k_vectors[:, 2] = np.cos(theta)  # z component
 
     # Normalize to have unit length (magnitude of k-vector should be 2*pi / wavelength)
+    k_vectors /= np.linalg.norm(k_vectors, axis = 1, keepdims=True)
     k_magnitude = 2.0*pi / wavelength
     k_vectors *= k_magnitude
 
@@ -288,7 +288,7 @@ def crystal_to_detector_pixels_vector(detector_distance, pixel_size, detector_si
         
     return k_out
 
-def gen_Qvectors_from_kins_kouts(kins, kouts):
+def gen_qvectors_from_kins_kouts(kins, kouts):
     """
     Given two arrays kins and kouts, this function generates all possible Q vectors 
     along with the indices of their corresponding k_out and k_in.
@@ -318,6 +318,7 @@ def gen_Qvectors_from_kins_kouts(kins, kouts):
     k_in = kins[k_in_indices]
     
     return difference_vectors, k_out, k_in
+
 
 
 def generate_detector_image(intensities, kouts, detector_size, pixel_size, distance):
@@ -413,7 +414,7 @@ def compute_kout_from_G_kin(G_arr, kin_arr):
     k_out = k_out.reshape(-1,3)
     
     # Generate the indices for the kin vectors
-    kin_indices = np.tile(np.arange(len(kin_arr)), len(G_arr))
+    kin_indices = np.repeat(np.arange(len(kin_arr)), len(G_arr))
     Garr_indices = np.repeat(np.arange(len(G_arr)), len(kin_arr))
     
     return k_out, kin_indices, Garr_indices

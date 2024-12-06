@@ -2,7 +2,7 @@ import math
 import numpy as np 
 from scipy.interpolate import RegularGridInterpolator
 from scipy.optimize import curve_fit
-
+import time
 def ComputeAngles(a,b,c,hkl1,hkl2):
     
     """
@@ -388,7 +388,7 @@ def create_square_with_uniform_phase(N, square_size, phase_range=(-np.pi, np.pi)
 
 def compute_fourier_transform(array):
     """Compute the Fourier transform of an array."""
-    ft = np.fft.fftshift(np.fft.fft2(array))
+    ft = np.fft.fftshift(np.fft.fftn(array))
     intensity = np.abs(ft)**2
     return intensity
 
@@ -467,6 +467,12 @@ def filter_vectors_by_direction(arr, kins, direction, max_angle):
     
     return arr, kins
 
+from joblib import Parallel, delayed
+
+def compute_norms_chunk(chunk):
+    return np.linalg.norm(chunk, axis=1)
+
+
 def filter_elastic_scatt(kouts, kins, tolerance):
     """
     
@@ -477,18 +483,33 @@ def filter_elastic_scatt(kouts, kins, tolerance):
         kouts (_type_): _description_
         kins (_type_): _description_
     """
-    
+    time1 = time.time()
     # Compute the magnitudes of kin and kout
-    kin_magnitudes = np.linalg.norm(kins, axis=1)  # Magnitudes of kin (N,)
-    kout_magnitudes = np.linalg.norm(kouts, axis=1)  # Magnitudes of kout (M*N,)
+    # kin_magnitudes = np.linalg.norm(kins, axis=1)  
+    # kout_magnitudes = np.linalg.norm(kouts, axis=1)  
     
+    # Parallelize norm computation
+    kin_magnitudes = np.concatenate(Parallel(n_jobs=-1)(delayed(compute_norms_chunk)(chunk) for chunk in np.array_split(kins, 4)))
+    kout_magnitudes = np.concatenate(Parallel(n_jobs=-1)(delayed(compute_norms_chunk)(chunk) for chunk in np.array_split(kouts, 4)))
+
+    time2 = time.time()
+    
+    print(f"calculating magnitudes took {time2-time1:.6f} seconds ")
     # Create a mask for filtering based on the magnitude condition
+    
+    time3 = time.time()
     magnitude_diff = np.abs(kin_magnitudes - kout_magnitudes)
     mask = magnitude_diff < tolerance
+    time4 = time.time()
+    print(f"mask creation took {time4 - time3 :.6f} seconds")
     
+    
+    time5 = time.time()
     # Apply the mask to get the filtered kin and kout pairs
     filtered_kin = kins[mask]
     filtered_kout = kouts[mask]
+    time6 = time.time()
+    print(f"filtering took {time6 - time5 :.6f} seconds")
     
     return filtered_kout, filtered_kin
     

@@ -44,7 +44,7 @@ def Z_Rot(z, right_handed = True):
     ])
 
     
-def StanRotMat(chi, mu, eta, phi, delta):        
+def StanRotMat(chi, mu, eta, phi):        
     
     #Standard System
     mu_rot = X_Rot(mu, right_handed = True)
