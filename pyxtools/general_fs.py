@@ -109,8 +109,6 @@ def CalcLen(arr, axis, mask_val):
     plane_vector1 = np.cross(axis, random_vec)  
     plane_vector2 = np.cross(axis, plane_vector1)  
 
-    print(plane_vector1)
-    print(plane_vector2)
     # Define the number of points in the plane
     num_points_x = unit //2
     num_points_y = unit //2

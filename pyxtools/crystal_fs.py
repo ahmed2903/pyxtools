@@ -122,6 +122,7 @@ def generate_recip_lattice_points(recpspaceVecs: np.ndarray, max_hkl: int) -> np
     h_range = range(-max_hkl, max_hkl + 1)
     l_range = range(-max_hkl, max_hkl + 1)
     k_range = range(-max_hkl, max_hkl + 1)
+    
     H_hkl = []
 
     for h in h_range:
@@ -135,7 +136,39 @@ def generate_recip_lattice_points(recpspaceVecs: np.ndarray, max_hkl: int) -> np
     
     return H_hkl
 
+def generate_recip_lattice_points2(recpspaceVecs: np.ndarray, max_hkl: int, ravel = False) -> np.ndarray:
 
+    """_summary_
+    Generates a set of reciprocal lattice points 
+
+    Input: 
+        - recpspaceVecs: A numpy array of the reciprocal space vectors of the system [A^-1]
+        - max_hkl: The maximum Miller index value to generate
+
+    Returns:
+        H_hkl: A numpy array containing a set of reciprocal lattice points. 
+    """
+    # Define h, k, l ranges
+    h_range = np.linspace(-max_hkl, max_hkl, 2*max_hkl+1) * np.linalg.norm(recpspaceVecs[0])
+    k_range = np.linspace(-max_hkl, max_hkl, 2*max_hkl+1) * np.linalg.norm(recpspaceVecs[1])
+    l_range = np.linspace(-max_hkl, max_hkl, 2*max_hkl+1) * np.linalg.norm(recpspaceVecs[2])
+    
+    H_hkl = []
+    
+    h_grid, k_grid, l_grid = np.meshgrid(h_range, k_range, l_range, indexing="ij")
+    
+
+    if ravel:
+        # Stack into a single array of shape (grid_points**3, 3)
+        q_vectors = np.stack((h_grid.ravel(), k_grid.ravel(), l_grid.ravel()), axis=-1)
+    else: 
+        q_vectors = np.stack((h_grid, k_grid,l_grid), axis=-1)
+
+    return q_vectors
+
+
+
+    
 def generate_realspace_lattice_points(N_ucs: int, realspaceVecs: np.ndarray) -> np.ndarray:
     """
     Generates a set of real space lattice points from the real space vectors
@@ -180,10 +213,7 @@ def gen_RLS_from_maxhkl(max_hkl, grid_points, a, b, c, ravel=False):
     b1 = np.linalg.norm(a)
     b2 = np.linalg.norm(b)
     b3 = np.linalg.norm(c)
-    
-
-    print(b1,b2,b3)
-    
+        
     # Define h, k, l ranges
     h = np.linspace(-max_hkl, max_hkl, grid_points) 
     k = np.linspace(-max_hkl, max_hkl, grid_points) 
@@ -192,7 +222,7 @@ def gen_RLS_from_maxhkl(max_hkl, grid_points, a, b, c, ravel=False):
     # Generate 3D grid of q-space
     h_grid, k_grid, l_grid = np.meshgrid(h, k, l, indexing="ij")
     
-    qx = h_grid * b1
+    qx = h_grid * b1 
     qy = k_grid * b2
     qz = l_grid * b3
 
@@ -220,8 +250,6 @@ def set_shape_array(arraysize, normals):
     shape_array = np.zeros(arraysize, dtype=np.uint8)  # Binary array to represent shape (0 or 1)
     n_voxels = np.prod(arraysize)
     
-    print(len(normals))
-
     # Generate 3D grid indices for the shape array
     indices = np.transpose(np.unravel_index(np.arange(n_voxels), arraysize))
     

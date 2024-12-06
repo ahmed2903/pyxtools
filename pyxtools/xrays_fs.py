@@ -154,16 +154,10 @@ def calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a):
         fj = calculate_atomic_formfactor(atom, q_vec, wavelength_a)
         fjs.append(fj)
         
-    print("atomic form factor done")
     
     fjs = np.array(fjs)
-    
-    print(fjs.shape)
-    print(rj.shape)
-    print("computing phase")
+
     phase = np.exp(-1j*np.dot(q_vec,rj.T))
-    print(phase.shape)
-    print("summing structure factor")
  
     s_q = np.sum(fjs.T*phase, axis = 1)
     
@@ -186,12 +180,8 @@ def calculate_scattering_amplitude(real_lattice_vecs, q_vec, R_i, atoms, rj_atom
     Returns:
         np.ndarray: the scattering amplitude
     """
-    print("computing form factor")
     form_factor = calculate_form_factor(real_lattice_vecs, q_vec, R_i)
-    print("form factor done")
-    print("computing structure factor")
     structure_factor = calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a)
-    print("structure_factor: done")
     scattering_amp = form_factor*structure_factor
     
     return scattering_amp
@@ -414,7 +404,7 @@ def compute_kout_from_G_kin(G_arr, kin_arr):
     k_out = k_out.reshape(-1,3)
     
     # Generate the indices for the kin vectors
-    kin_indices = np.repeat(np.arange(len(kin_arr)), len(G_arr))
+    kin_indices = np.tile(np.arange(len(kin_arr)), len(G_arr))
     Garr_indices = np.repeat(np.arange(len(G_arr)), len(kin_arr))
     
     return k_out, kin_indices, Garr_indices
