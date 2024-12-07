@@ -128,7 +128,8 @@ def generate_recip_lattice_points(recpspaceVecs: np.ndarray, max_hkl: int) -> np
     for h in h_range:
         for k in k_range:
             for l in l_range:
-                if not (h == 0 and k == 0 and l == 0):
+                #if not (h == 0 and k == 0 and l == 0):
+                if h!=0 and k!=0 and l!=0:
                     H = h * recpspaceVecs[0] + k * recpspaceVecs[1] + l * recpspaceVecs[2]
                     H_hkl.append(H)
     
