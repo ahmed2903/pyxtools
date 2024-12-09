@@ -234,6 +234,55 @@ def gen_RLS_from_maxhkl(max_hkl, grid_points, a, b, c, ravel=False):
         q_vectors = np.stack((qx, qy, qz), axis=-1)
 
     return q_vectors
+def gen_RLS_from_maxhkl_maskOrigin(max_hkl, grid_points, a, b, c, threshold=0.1, ravel=False):
+    """
+    Generate reciprocal space q-vectors for a general lattice and remove the 0,0,0 order and surrounding cube.
+
+    Parameters:
+        max_hkl (int): Maximum value of h, k, l indices.
+        grid_points (int): Number of grid points along each axis.
+        a, b, c (np.ndarray): Reciprocal-space lattice vectors.
+        threshold (float): Distance threshold to exclude points around (0, 0, 0).
+        ravel (bool): Whether to return the q-vectors as a flat array.
+
+    Returns:
+        q_vectors (numpy.ndarray): Array of q-vectors with the 0,0,0 region removed.
+    """
+    # Reciprocal lattice basis vector magnitudes
+    b1 = np.linalg.norm(a)
+    b2 = np.linalg.norm(b)
+    b3 = np.linalg.norm(c)
+        
+    # Define h, k, l ranges
+    h = np.linspace(-max_hkl, max_hkl, grid_points) 
+    k = np.linspace(-max_hkl, max_hkl, grid_points) 
+    l = np.linspace(-max_hkl, max_hkl, grid_points) 
+
+    # Generate 3D grid of q-space
+    h_grid, k_grid, l_grid = np.meshgrid(h, k, l, indexing="ij")
+    
+    # Calculate qx, qy, qz components
+    qx = h_grid * b1 
+    qy = k_grid * b2
+    qz = l_grid * b3
+
+    # Combine components into a single array
+    q_vectors = np.stack((qx, qy, qz), axis=-1)
+    
+    # Compute the distance of each point from the origin
+    distances = np.sqrt(qx**2 + qy**2 + qz**2)
+
+    # Mask out the region near the origin (including 0,0,0)
+    mask = distances > threshold
+
+    if ravel:
+        # Stack into a single array of shape (grid_points**3, 3)
+        q_vectors = q_vectors[mask]
+        
+    else: 
+        q_vectors[~mask] = np.nan 
+
+    return q_vectors
 
 def set_shape_array(arraysize, normals):
     """
