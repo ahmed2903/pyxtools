@@ -268,9 +268,12 @@ def gen_RLS_from_maxhkl_maskOrigin(max_hkl, grid_points, a, b, c, threshold=0.1,
 
     # Combine components into a single array
     q_vectors = np.stack((qx, qy, qz), axis=-1)
+    print(q_vectors.shape)
     
     # Compute the distance of each point from the origin
     distances = np.sqrt(qx**2 + qy**2 + qz**2)
+    print(qx.shape)
+    print(distances.shape)
 
     # Mask out the region near the origin (including 0,0,0)
     mask = distances > threshold
