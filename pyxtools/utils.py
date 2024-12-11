@@ -22,5 +22,5 @@ def indexQ(Qvec, rlv):
         rlv (vector): Reciprocal lattice vectors (3,3) (astar, bstar, cstar)
     """
 
-    HKL = np.dot(Qvec, np.linalg.inv(rlv))#.astype(int)
+    HKL = np.round(np.dot(Qvec, np.linalg.inv(rlv))).astype(int)
     return HKL
