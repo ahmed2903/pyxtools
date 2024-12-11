@@ -287,6 +287,37 @@ def gen_RLS_from_maxhkl_maskOrigin(max_hkl, grid_points, a, b, c, threshold=0.1,
 
     return q_vectors
 
+def gen_rlvs_for_one_hkl(hkl:tuple, recip_vecs, grid_points, range_scale, ravel = True):
+    
+    h,k,l = hkl
+    
+    G_vec = h*recip_vecs[0] +  k*recip_vecs[1] + l*recip_vecs[2]
+    
+    # Reciprocal lattice basis vector magnitudes
+    b1 = np.linalg.norm(recip_vecs[0])
+    b2 = np.linalg.norm(recip_vecs[1])
+    b3 = np.linalg.norm(recip_vecs[2])
+        
+    # Define h, k, l ranges
+    h = np.linspace(-1, 1, grid_points) 
+
+    # Generate 3D grid of q-space
+    h_grid, k_grid, l_grid = np.meshgrid(h, h, h, indexing="ij")
+    
+    # Calculate qx, qy, qz components
+    qx = h_grid * b1 * range_scale
+    qy = k_grid * b2 * range_scale 
+    qz = l_grid * b3 * range_scale
+
+    # Combine components into a single array
+    q_vectors = G_vec + np.stack((qx, qy, qz), axis=-1)
+    
+    if ravel:
+        q_vectors = q_vectors.reshape(-1,3)
+        
+    return q_vectors
+    
+
 def set_shape_array(arraysize, normals):
     """
     Create a shape function array representing the crystal's geometry.
@@ -350,6 +381,8 @@ def cuboid_normals(arraysize):
     ]
     
     return normals
+
+
 
 def compute_shape_transform(shape_array, grid_spacing):
     
