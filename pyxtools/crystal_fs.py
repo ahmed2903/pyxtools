@@ -137,6 +137,45 @@ def generate_recip_lattice_points(recpspaceVecs: np.ndarray, max_hkl: int) -> np
     
     return H_hkl
 
+def generate_recip_lattice_points_hkl(recpspaceVecs: np.ndarray, hkl:tuple, hkl_range, gridpoints) -> np.ndarray:
+
+    """_summary_
+    Generates a set of reciprocal lattice points 
+
+    Input: 
+        - recpspaceVecs: A numpy array of the reciprocal space vectors of the system [A^-1]
+        - max_hkl: The maximum Miller index value to generate
+
+    Returns:
+        H_hkl: A numpy array containing a set of reciprocal lattice points. 
+    """
+    
+    hkl_freq = hkl_range / gridpoints
+    
+    ranges = np.linalg.norm(recpspaceVecs, axis = 1) * hkl_range
+    
+    h_range = np.arange(-ranges[0], ranges[0], hkl_freq)
+    l_range = np.arange(-ranges[1], ranges[1], hkl_freq)
+    k_range = np.arange(-ranges[2], ranges[2], hkl_freq)
+    
+    print(h_range)
+    h,k,l = hkl
+    Gvec = h*recpspaceVecs[0] + k*recpspaceVecs[1] + l*recpspaceVecs[2]
+    
+    H_hkl = []
+
+    for ih in h_range:
+        for ik in k_range:
+            for il in l_range:
+                #if not (h == 0 and k == 0 and l == 0):
+                if h!=0 and k!=0 and l!=0:
+                    delta_q = ih * recpspaceVecs[0] + ik * recpspaceVecs[1] + il * recpspaceVecs[2]
+                    H_hkl.append(Gvec+delta_q)
+    
+    H_hkl = np.array(H_hkl)
+    
+    return H_hkl
+
 def generate_recip_lattice_points2(recpspaceVecs: np.ndarray, max_hkl: int, ravel = False) -> np.ndarray:
 
     """_summary_
