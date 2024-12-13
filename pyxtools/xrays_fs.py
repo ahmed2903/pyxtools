@@ -129,13 +129,14 @@ def calculate_form_factor(real_lattice_vecs, q_vec, R_i):
     
     # Volume of unit cell
     V_cell = np.dot(real_lattice_vecs[0], np.cross(real_lattice_vecs[1], real_lattice_vecs[2])) 
-
+    print("qshape")
+    print(q_vec.shape)
+    
     phase = np.exp(-1j*np.dot(q_vec,R_i.T))
                    
     f_q = 2*pi * np.sum(phase, axis = -1) / V_cell 
     
-    print("qshape")
-    print(q_vec.shape)
+   
     print('fq shape')
     print(f_q.shape)
     return f_q

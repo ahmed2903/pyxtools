@@ -333,28 +333,29 @@ def gen_rlvs_for_one_hkl(hkl:tuple, recip_vecs, grid_points, range_scale, ravel 
     b3 = np.linalg.norm(recip_vecs[2])
         
     # Define h, k, l ranges
-    h = np.linspace(-1, 1, grid_points) 
-    k = np.linspace(-1, 1, grid_points)
-    l = np.linspace(-1, 1, grid_points)
+    h = np.linspace(-1, 1, grid_points) * b1 * range_scale
+    k = np.linspace(-1, 1, grid_points) * b2 * range_scale 
+    l = np.linspace(-1, 1, grid_points) * b3 * range_scale
 
     print(h * b1)
     # Generate 3D grid of q-space
     h_grid, k_grid, l_grid = np.meshgrid(h, k, l, indexing="ij")
     
     # Calculate qx, qy, qz components
-    qx = h_grid * b1 * range_scale
-    qy = k_grid * b2 * range_scale 
-    qz = l_grid * b3 * range_scale
-
+    qx = h_grid 
+    qy = k_grid 
+    qz = l_grid 
+    
     # Combine components into a single array
     q_vectors = G_vec + np.stack((qx, qy, qz), axis=-1)
     
     if ravel:
         q_vectors = q_vectors.reshape(-1,3)
     
+    
     print("qvector at genertion")
     print(q_vectors.shape)
-    return q_vectors
+    return q_vectors, (h,k,l)
     
 
 def set_shape_array(arraysize, normals):
