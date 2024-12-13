@@ -3,6 +3,8 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 from scipy.optimize import curve_fit
 import time
+from scipy.ndimage import convolve
+
 def ComputeAngles(a,b,c,hkl1,hkl2):
     
     """
@@ -80,7 +82,7 @@ def CalcAngle(vec1, vec2):
     """
 
     angle = np.rad2deg(math.acos(np.dot(vec1,vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))))
-    
+    return angle
     
 def CalcLen(arr, axis, mask_val):
     """
@@ -386,6 +388,10 @@ def create_square_with_uniform_phase(N, square_size, phase_range=(-np.pi, np.pi)
 
 def compute_fourier_transform(array):
     """Compute the Fourier transform of an array."""
+    shp = array.shape
+    
+    array = pad(array, shp[0]//2, shp[0]//2, shp[1]//2, shp[1]//2, shp[2]//2, shp[2]//2)
+    
     ft = np.fft.fftshift(np.fft.fftn(array))
     intensity = np.abs(ft)**2
     return intensity
@@ -471,7 +477,7 @@ def compute_norms_chunk(chunk):
     return np.linalg.norm(chunk, axis=1)
 
 
-def filter_elastic_scatt(kouts, kins, tolerance):
+def filter_elastic_scatt(kouts, kins, tolerance, wavelength):
     """
     
     Filters the kouts and kins to consider only when:
@@ -487,7 +493,6 @@ def filter_elastic_scatt(kouts, kins, tolerance):
     # kout_magnitudes = np.linalg.norm(kouts, axis=1)  
     
     # Parallelize norm computation
-    kin_magnitudes = np.concatenate(Parallel(n_jobs=-1)(delayed(compute_norms_chunk)(chunk) for chunk in np.array_split(kins, 4)))
     kout_magnitudes = np.concatenate(Parallel(n_jobs=-1)(delayed(compute_norms_chunk)(chunk) for chunk in np.array_split(kouts, 4)))
 
     time2 = time.time()
@@ -495,12 +500,14 @@ def filter_elastic_scatt(kouts, kins, tolerance):
     print(f"calculating magnitudes took {time2-time1:.6f} seconds ")
     # Create a mask for filtering based on the magnitude condition
     
-    time3 = time.time()
-    magnitude_diff = np.abs(kin_magnitudes - kout_magnitudes)
-    mask = magnitude_diff < tolerance
-    time4 = time.time()
-    print(f"mask creation took {time4 - time3 :.6f} seconds")
+    magnitude = 2*math.pi / wavelength
     
+    
+    magnitude_diff = np.abs(magnitude - kout_magnitudes)
+    mask = magnitude_diff < tolerance
+    
+    print("mask shape is ")
+    print(mask.shape)
     
     time5 = time.time()
     # Apply the mask to get the filtered kin and kout pairs
@@ -531,3 +538,48 @@ def calc_detector_max_angle(detector_size, detector_distance):
     
     return max_angle
 
+def line_convolution_3d(object_3d, line_vectors, kernel_size=None, boundary_mode='constant', cval=0):
+    """
+    Perform convolution of a 3D array with a kernel based on line vectors.
+    
+    Parameters:
+    -----------
+    object_3d : numpy.ndarray
+        A 3D array representing the object to convolve.
+    line_vectors : numpy.ndarray
+        An (N, 3) array where each row is a directional vector representing the line.
+    kernel_size : int, optional
+        Size of the cubic kernel. If None, it defaults to max(5, len(line_vectors)).
+    boundary_mode : str, optional
+        How to handle boundaries. Options are 'constant', 'nearest', 'reflect', or 'wrap'.
+    cval : float, optional
+        Value to fill in for `constant` boundary mode. Default is 0.
+    
+    Returns:
+    --------
+    numpy.ndarray
+        The 3D array resulting from the convolution.
+    """
+    # Normalize line vectors
+    line_vectors = line_vectors / np.linalg.norm(line_vectors, axis=1, keepdims=True)
+
+    # Determine kernel size
+    if kernel_size is None:
+        kernel_size = max(5, len(line_vectors))
+    
+    # Create a cubic kernel
+    kernel = np.zeros((kernel_size, kernel_size, kernel_size))
+    center = kernel_size // 2
+
+    # Fill the kernel based on line vectors
+    for vec in line_vectors:
+        x, y, z = np.round(center + vec * (kernel_size // 2)).astype(int)
+        if 0 <= x < kernel_size and 0 <= y < kernel_size and 0 <= z < kernel_size:
+            kernel[x, y, z] = 1
+
+    # Normalize the kernel
+    kernel /= kernel.sum()
+
+    # Perform convolution
+    result = convolve(object_3d, kernel, mode=boundary_mode, cval=cval)
+    return result

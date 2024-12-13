@@ -107,7 +107,8 @@ def calculate_atomic_formfactor(atom: str, qvec: np.ndarray, wavelength_a: float
     Z = abc[-1]
 
     inter = Z - 41.78214 * s**2  * ( (a1*np.exp(-b1*s**2)) + a2*np.exp(-b2*s**2) + a3*np.exp(-b3*s**2) +  a4*np.exp(-b4*s**2) ) +c
-
+    print('inter shape')
+    print(inter.shape)
     return inter
 
 def calculate_form_factor(real_lattice_vecs, q_vec, R_i):
@@ -129,8 +130,14 @@ def calculate_form_factor(real_lattice_vecs, q_vec, R_i):
     # Volume of unit cell
     V_cell = np.dot(real_lattice_vecs[0], np.cross(real_lattice_vecs[1], real_lattice_vecs[2])) 
 
-    f_q = 2*pi * np.sum(np.exp(-1j*np.dot(q_vec,R_i.T)), axis = -1) / V_cell 
+    phase = np.exp(-1j*np.dot(q_vec,R_i.T))
+                   
+    f_q = 2*pi * np.sum(phase, axis = -1) / V_cell 
     
+    print("qshape")
+    print(q_vec.shape)
+    print('fq shape')
+    print(f_q.shape)
     return f_q
 
 def calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a):
@@ -158,8 +165,12 @@ def calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a):
     fjs = np.array(fjs)
 
     phase = np.exp(-1j*np.dot(q_vec,rj.T))
+    
+    print(phase.shape)
+    print(fjs.shape)
  
-    s_q = np.sum(fjs.T*phase, axis = 1)
+    t = fjs.T*phase
+    s_q = np.sum(t, axis = -1)
     
     return s_q
 
@@ -381,6 +392,9 @@ def reverse_kouts_to_pixels(kouts, intensiies, detector_size, pixel_size, detect
     
     x_pixel_indices = x_pixel_indices[in_bounds_mask]
     y_pixel_indices = y_pixel_indices[in_bounds_mask]
+    
+    print(intensiies.shape)
+    print(in_bounds_mask.shape)
     intensiies = intensiies[in_bounds_mask]
 
 
