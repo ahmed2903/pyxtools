@@ -128,8 +128,8 @@ def generate_recip_lattice_points(recpspaceVecs: np.ndarray, max_hkl: int) -> np
     for h in h_range:
         for k in k_range:
             for l in l_range:
-                #if not (h == 0 and k == 0 and l == 0):
-                if h!=0 and k!=0 and l!=0:
+                if not (h == 0 and k == 0 and l == 0):
+                #if h!=0 and k!=0 and l!=0:
                     H = h * recpspaceVecs[0] + k * recpspaceVecs[1] + l * recpspaceVecs[2]
                     H_hkl.append(H)
     
@@ -144,21 +144,21 @@ def generate_recip_lattice_points_hkl(recpspaceVecs: np.ndarray, hkl:tuple, hkl_
 
     Input: 
         - recpspaceVecs: A numpy array of the reciprocal space vectors of the system [A^-1]
-        - max_hkl: The maximum Miller index value to generate
+        - hkl: The  Miller index value of the reflection of interest to generate
 
     Returns:
-        H_hkl: A numpy array containing a set of reciprocal lattice points. 
+        H_hkl: A numpy array containing a set of reciprocal lattice points around the desired reflection . 
     """
     
-    hkl_freq = hkl_range / gridpoints
+    hkl_freq = (2*hkl_range) / gridpoints 
+        
+    h_range = np.arange(-hkl_range, hkl_range, hkl_freq) * np.linalg.norm(recpspaceVecs[0])
+    k_range = np.arange(-hkl_range, hkl_range, hkl_freq) * np.linalg.norm(recpspaceVecs[1])
+    l_range = np.arange(-hkl_range, hkl_range, hkl_freq) * np.linalg.norm(recpspaceVecs[2])
     
-    ranges = np.linalg.norm(recpspaceVecs, axis = 1) * hkl_range
-    
-    h_range = np.arange(-ranges[0], ranges[0], hkl_freq)
-    l_range = np.arange(-ranges[1], ranges[1], hkl_freq)
-    k_range = np.arange(-ranges[2], ranges[2], hkl_freq)
-    
+    print("hrange is: ")
     print(h_range)
+    
     h,k,l = hkl
     Gvec = h*recpspaceVecs[0] + k*recpspaceVecs[1] + l*recpspaceVecs[2]
     
@@ -167,10 +167,8 @@ def generate_recip_lattice_points_hkl(recpspaceVecs: np.ndarray, hkl:tuple, hkl_
     for ih in h_range:
         for ik in k_range:
             for il in l_range:
-                #if not (h == 0 and k == 0 and l == 0):
-                if h!=0 and k!=0 and l!=0:
-                    delta_q = ih * recpspaceVecs[0] + ik * recpspaceVecs[1] + il * recpspaceVecs[2]
-                    H_hkl.append(Gvec+delta_q)
+                delta_q = ih * recpspaceVecs[0] + ik * recpspaceVecs[1] + il * recpspaceVecs[2]
+                H_hkl.append(Gvec+delta_q)
     
     H_hkl = np.array(H_hkl)
     
@@ -307,12 +305,9 @@ def gen_RLS_from_maxhkl_maskOrigin(max_hkl, grid_points, a, b, c, threshold=0.1,
 
     # Combine components into a single array
     q_vectors = np.stack((qx, qy, qz), axis=-1)
-    print(q_vectors.shape)
     
     # Compute the distance of each point from the origin
     distances = np.sqrt(qx**2 + qy**2 + qz**2)
-    print(qx.shape)
-    print(distances.shape)
 
     # Mask out the region near the origin (including 0,0,0)
     mask = distances > threshold
@@ -339,9 +334,12 @@ def gen_rlvs_for_one_hkl(hkl:tuple, recip_vecs, grid_points, range_scale, ravel 
         
     # Define h, k, l ranges
     h = np.linspace(-1, 1, grid_points) 
+    k = np.linspace(-1, 1, grid_points)
+    l = np.linspace(-1, 1, grid_points)
 
+    print(h * b1)
     # Generate 3D grid of q-space
-    h_grid, k_grid, l_grid = np.meshgrid(h, h, h, indexing="ij")
+    h_grid, k_grid, l_grid = np.meshgrid(h, k, l, indexing="ij")
     
     # Calculate qx, qy, qz components
     qx = h_grid * b1 * range_scale
@@ -353,7 +351,9 @@ def gen_rlvs_for_one_hkl(hkl:tuple, recip_vecs, grid_points, range_scale, ravel 
     
     if ravel:
         q_vectors = q_vectors.reshape(-1,3)
-        
+    
+    print("qvector at genertion")
+    print(q_vectors.shape)
     return q_vectors
     
 
