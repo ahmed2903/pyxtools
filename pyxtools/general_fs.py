@@ -538,48 +538,35 @@ def calc_detector_max_angle(detector_size, detector_distance):
     
     return max_angle
 
-def line_convolution_3d(object_3d, line_vectors, kernel_size=None, boundary_mode='constant', cval=0):
+import numpy as np
+
+def convolve_reciprocal_lattice_with_grid(shape_transform, reciprocal_vectors, kx,ky,kz):
     """
-    Perform convolution of a 3D array with a kernel based on line vectors.
-    
+    Convolve reciprocal lattice points with a 3D shape transform, including grid generation.
+
     Parameters:
-    -----------
-    object_3d : numpy.ndarray
-        A 3D array representing the object to convolve.
-    line_vectors : numpy.ndarray
-        An (N, 3) array where each row is a directional vector representing the line.
-    kernel_size : int, optional
-        Size of the cubic kernel. If None, it defaults to max(5, len(line_vectors)).
-    boundary_mode : str, optional
-        How to handle boundaries. Options are 'constant', 'nearest', 'reflect', or 'wrap'.
-    cval : float, optional
-        Value to fill in for `constant` boundary mode. Default is 0.
-    
+        shape_transform (numpy.ndarray): A 3D array representing the shape transform (size: grid_size).
+        reciprocal_vectors (numpy.ndarray): An (N, 3) array of reciprocal lattice vectors.
+
     Returns:
-    --------
-    numpy.ndarray
-        The 3D array resulting from the convolution.
-    """
-    # Normalize line vectors
-    line_vectors = line_vectors / np.linalg.norm(line_vectors, axis=1, keepdims=True)
-
-    # Determine kernel size
-    if kernel_size is None:
-        kernel_size = max(5, len(line_vectors))
+        output_points (numpy.ndarray): An (M, 3) array of convolved reciprocal lattice points (M = N * K).
+        combined_intensities (numpy.ndarray): An (M,) array of intensities for each convolved point.
+    """    
     
-    # Create a cubic kernel
-    kernel = np.zeros((kernel_size, kernel_size, kernel_size))
-    center = kernel_size // 2
+    # Flatten the 3D shape transform into a list of points (K, 3)
+    X, Y, Z = np.meshgrid(kx, ky, kz, indexing="ij")
+    shape_coords = np.array([X.ravel(), Y.ravel(), Z.ravel()]).T  # (K, 3)
+    shape_values = shape_transform.ravel()  # (K,)
 
-    # Fill the kernel based on line vectors
-    for vec in line_vectors:
-        x, y, z = np.round(center + vec * (kernel_size // 2)).astype(int)
-        if 0 <= x < kernel_size and 0 <= y < kernel_size and 0 <= z < kernel_size:
-            kernel[x, y, z] = 1
+    # Number of reciprocal lattice points (N) and shape points (K)
+    N = len(reciprocal_vectors)
+    K = len(shape_coords)
 
-    # Normalize the kernel
-    kernel /= kernel.sum()
+    # Compute the convolved points (M = N * K)
+    output_points = (reciprocal_vectors[:, None, :] + shape_coords[None, :, :]).reshape(-1, 3)  # (M, 3)
 
-    # Perform convolution
-    result = convolve(object_3d, kernel, mode=boundary_mode, cval=cval)
-    return result
+    # Compute combined intensities for each point
+    reciprocal_intensities = np.ones(N)  # Default to uniform intensity; modify if needed
+    combined_intensities = (reciprocal_intensities[:, None] * shape_values[None, :]).ravel()  # (M,)
+
+    return output_points, combined_intensities
