@@ -268,8 +268,7 @@ def gen_rlvs_for_one_hkl(hkl:tuple, recip_vecs, grid_points, range_scale, ravel 
     h = np.linspace(-1, 1, grid_points) * b1 * range_scale
     k = np.linspace(-1, 1, grid_points) * b2 * range_scale 
     l = np.linspace(-1, 1, grid_points) * b3 * range_scale
-
-    print(h * b1)
+    
     # Generate 3D grid of q-space
     h_grid, k_grid, l_grid = np.meshgrid(h, k, l, indexing="ij")
     
@@ -284,9 +283,6 @@ def gen_rlvs_for_one_hkl(hkl:tuple, recip_vecs, grid_points, range_scale, ravel 
     if ravel:
         q_vectors = q_vectors.reshape(-1,3)
     
-    
-    print("qvector at genertion")
-    print(q_vectors.shape)
     return q_vectors, (h,k,l)
     
 
@@ -374,3 +370,68 @@ def compute_shape_transform(shape_array, grid_spacing):
     return shapetransform, (qx, qy, qz)
 
 
+def mask_coordinates_array(coords_arr, illumination_volume):
+    
+    
+    """
+    
+    Inputs:
+        coords_arr: an N,3 array describing the real space coordinates of every unit cell in the crystal
+        
+    
+    """
+    
+    xs, ys, zs = coords_arr[:,0] , coords_arr[:,1] , coords_arr[:,2]
+        
+    xi, xf = illumination_volume[0] 
+    
+    yi, yf = illumination_volume[1] 
+    
+    zi, zf = illumination_volume[2] 
+                
+    weights = (
+                (xi <= xs ) & ( xs < xf) &
+                (yi <= ys ) & ( ys < yf) &
+                (zi <= zs ) & ( zs < zf)
+            )
+
+    
+    
+    object = coords_arr[weights]
+    
+    return object
+
+def define_interaction_volume(xi, xf, yi, yf, zi, zf, lattice_vectors):
+    """
+    Define the interaction volume in lattice coordinates based on unit cell bounds.
+
+    Parameters:
+    -----------
+    xi, xf : int
+        Bounds along the a-axis (unit cell indices).
+    yi, yf : int
+        Bounds along the b-axis (unit cell indices).
+    zi, zf : int
+        Bounds along the c-axis (unit cell indices).
+    a, b, c : np.ndarray
+        Lattice vectors (each of shape (3,)).
+
+    Returns:
+    --------
+    np.ndarray
+        Array of shape (N, 3), where N is the number of lattice points in the interaction volume.
+    """
+    # Generate all combinations of indices within the bounds
+    i_indices = np.arange(xi, xf )
+    j_indices = np.arange(yi, yf )
+    k_indices = np.arange(zi, zf )
+    
+    # Create a grid of all combinations (i, j, k)
+    i, j, k = np.meshgrid(i_indices, j_indices, k_indices, indexing='ij')
+    
+    indices = np.stack((i.ravel(), j.ravel(), k.ravel()), axis = 1)  # Shape: (N, 3)
+
+    # Project indices onto the lattice
+    lattice_coords = np.dot(indices, lattice_vectors)
+
+    return lattice_coords
