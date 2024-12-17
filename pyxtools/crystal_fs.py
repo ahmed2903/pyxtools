@@ -435,3 +435,31 @@ def define_interaction_volume(xi, xf, yi, yf, zi, zf, lattice_vectors):
     lattice_coords = np.dot(indices, lattice_vectors)
 
     return lattice_coords
+
+def ptycho_scan_volumes(crystal_size, stride, beam_focus):
+    
+    zi = 0
+    zf = int(crystal_size[2])
+    
+    
+    xsize = crystal_size[0]
+    ysize = crystal_size[1]
+    
+    x_stride, y_stride = stride
+    x_focus, y_focus = beam_focus
+    
+    illumination_vols = []
+        
+    for xs in range(0, xsize-x_focus+1, x_stride):
+        
+        for ys in range(0,ysize-y_focus+1, y_stride):
+            
+            xi = xs
+            xf = xs + x_focus
+            
+            yi = ys
+            yf = ys + y_focus
+            
+            illumination_vols.append((int(xi),int(xf),int(yi),int(yf),int(zi),int(zf)))
+            
+    return illumination_vols
