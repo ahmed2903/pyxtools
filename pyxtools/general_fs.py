@@ -538,7 +538,6 @@ def calc_detector_max_angle(detector_size, detector_distance):
     
     return max_angle
 
-import numpy as np
 
 def convolve_reciprocal_lattice_with_grid(shape_transform, reciprocal_vectors, kx,ky,kz):
     """
