@@ -225,16 +225,18 @@ def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
     # The beam is converging toward (0, 0, focal_length)
     focal_point = np.array([0, 0, focal_length])
 
-    # # Normalize each vector to point towards the focal point
-    # for i in range(num_vectors):
-    #     # Direction vector from the k-vector's point to the focal point
-    #     direction_to_focus = focal_point - k_vectors[i]
-    #     # Normalize this direction
-    #     direction_to_focus /= np.linalg.norm(direction_to_focus)
-    #     # Update k-vector direction (the normalized vector)
-    #     k_vectors[i] = direction_to_focus * k_magnitude
+    # Normalize each vector to point towards the focal point
+    for i in range(num_vectors):
+        # Direction vector from the k-vector's point to the focal point
+        direction_to_focus = focal_point - k_vectors[i]
+        # Normalize this direction
+        direction_to_focus /= np.linalg.norm(direction_to_focus)
+        # Update k-vector direction (the normalized vector)
+        k_vectors[i] = direction_to_focus * k_magnitude
 
     return k_vectors
+
+
 
 def crystal_to_detector_pixels_vector(detector_distance, pixel_size, detector_size, wavelength):
     
