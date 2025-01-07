@@ -4,7 +4,7 @@ from scipy.interpolate import RegularGridInterpolator
 
 import vtk
 from vtk.util import numpy_support
-from geometry  import X_Rot, Y_Rot, Z_Rot
+#from geometry  import X_Rot, Y_Rot, Z_Rot
 
 def RotateVecs(data, axis, angle):
 	shp = data.shape[0:3]
@@ -90,8 +90,8 @@ def Transform(array, distance, binx, biny, binz, twotheta, dtheta, kind):
     vtk_dataset = vtk.vtkStructuredGrid()
     flat_data_amp = (np.abs(array)).transpose(2,1,0).flatten()
     flat_data_phase = (np.angle(array)).transpose(2,1,0).flatten()
-    vtk_scalararray_amp = numpy_support.np_to_vtk(flat_data_amp)
-    vtk_scalararray_phase = numpy_support.np_to_vtk(flat_data_phase)
+    vtk_scalararray_amp = numpy_support.numpy_to_vtk(flat_data_amp)
+    vtk_scalararray_phase = numpy_support.numpy_to_vtk(flat_data_phase)
     vtk_points = vtk.vtkPoints()
     
     coordarray = np.zeros((array.size,3), dtype=np.double)
@@ -131,14 +131,14 @@ def InterpolateObject(data, coords, gridsize, cbounds, irange):
     """
     
     shp = np.array(data.shape, dtype=np.int64)
-    vtk_coordarray = numpy_support.np_to_vtk(coords)
+    vtk_coordarray = numpy_support.numpy_to_vtk(coords)
     vtk_points = vtk.vtkPoints()
     vtk_points.SetDataTypeToDouble()
     vtk_points.SetNumberOfPoints(data.size)
     vtk_points.SetData(vtk_coordarray)
     ## amp
     flat_data_amp = (np.abs(data)).transpose(2,1,0).flatten()
-    vtk_data_array_amp = numpy_support.np_to_vtk(flat_data_amp)
+    vtk_data_array_amp = numpy_support.numpy_to_vtk(flat_data_amp)
     image_amp = vtk.vtkStructuredGrid()
     image_amp.SetPoints(vtk_points)
     image_amp.GetPointData().SetScalars(vtk_data_array_amp)
