@@ -243,23 +243,63 @@ def TransposeArray(array):
     return array2
 
 def pad(array, psx, psy, psz, pex, pey, pez):
+
+    dtype = array.dtype
+    
     shp = array.shape
 
-    array = np.concatenate((np.zeros((psx,shp[1],shp[2]), dtype = np.cdouble, order = 'C'), array), axis = 0)
-    array = np.concatenate((array, np.zeros((pex,shp[1],shp[2]), dtype = np.cdouble, order = 'C')), axis = 0)
+    array = np.concatenate((np.zeros((psx,shp[1],shp[2]), dtype = dtype, order = 'C'), array), axis = 0)
+    array = np.concatenate((array, np.zeros((pex,shp[1],shp[2]), dtype = dtype, order = 'C')), axis = 0)
 
     shp = array.shape
 
-    array = np.concatenate((np.zeros((shp[0],psy,shp[2]), dtype = np.cdouble, order = 'C'), array), axis = 1)
-    array = np.concatenate((array, np.zeros((shp[0],pey,shp[2]), dtype = np.cdouble, order = 'C')), axis = 1)
+    array = np.concatenate((np.zeros((shp[0],psy,shp[2]), dtype = dtype, order = 'C'), array), axis = 1)
+    array = np.concatenate((array, np.zeros((shp[0],pey,shp[2]), dtype = dtype, order = 'C')), axis = 1)
 
     shp = array.shape
 
-    array = np.concatenate((np.zeros((shp[0],shp[1],psz), dtype = np.cdouble, order = 'C'), array), axis = 2)
-    array = np.concatenate((array, np.zeros((shp[0],shp[1],pez), dtype = np.cdouble, order = 'C')), axis = 2)
+    array = np.concatenate((np.zeros((shp[0],shp[1],psz), dtype = dtype, order = 'C'), array), axis = 2)
+    array = np.concatenate((array, np.zeros((shp[0],shp[1],pez), dtype = dtype, order = 'C')), axis = 2)
 
     return array
 
+def pad_to_double(array):
+    
+    shp = array.shape
+    pad_x = shp[0]//2
+    pad_y = shp[1]//2
+    pad_z = shp[2]//2
+
+    padded_array = pad(array, pad_x, pad_y, pad_z, pad_x, pad_y, pad_z)
+    
+    return padded_array
+
+def pad_2d(array, psx, psy, pex, pey):
+
+    dtype = array.dtype
+    shp = array.shape
+
+    array = np.concatenate((np.zeros((psx,shp[1]), dtype = dtype, order = 'C'), array), axis = 0)
+    array = np.concatenate((array, np.zeros((pex,shp[1]), dtype = dtype, order = 'C')), axis = 0)
+
+    shp = array.shape
+
+    array = np.concatenate((np.zeros((shp[0],psy), dtype = dtype, order = 'C'), array), axis = 1)
+    array = np.concatenate((array, np.zeros((shp[0],pey), dtype = dtype, order = 'C')), axis = 1)
+
+
+    return array
+
+def pad_to_double_2d(array):
+    
+    shp = array.shape
+    pad_x = shp[0]//2
+    pad_y = shp[1]//2
+
+    padded_array = pad_2d(array, pad_x, pad_y, pad_x, pad_y)
+    
+    return padded_array
+    
 def PRTF(diff_array, rec_array, ring_size, fs_spacing, mask_val):
     
     """
