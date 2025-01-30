@@ -44,16 +44,16 @@ def rotation_matrix(alpha, beta, gamma):
 
 
 # Define the objective function
-def objective_function(params, kouts, G_initial, ttheta):
+def objective_function(params, kouts, G_initial, ttheta, wavelength):
     # Rotate G using Euler angles
     alpha, beta, gamma = params
     R = rotation_matrix(alpha, beta, gamma)
     G = R @ G_initial
     C = G/2
     
-    k_mag = 2*np.pi/exp.wavelength 
+    k_mag = 2*np.pi/wavelength 
     R_circle = k_mag * np.cos(ttheta)
-    Gmag = 4*np.pi / exp.wavelength * np.sin(ttheta/2)
+    Gmag = 4*np.pi / wavelength * np.sin(ttheta/2)
 
     
         
