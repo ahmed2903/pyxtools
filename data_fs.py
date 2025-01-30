@@ -7,7 +7,7 @@ import concurrent.futures
 import h5py
 import os
 
-import pyxtools.xrays_fs as xf
+import xrays_fs as xf
 
 def load_hdf_roi(data_folder, f_name, roi):
     """

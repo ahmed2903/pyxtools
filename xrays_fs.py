@@ -7,8 +7,8 @@ import itertools as it
 from multiprocessing import Pool, cpu_count
 from scipy.optimize import minimize
 
-from . import utils as ut
-from . import atom_info as af
+import utils as ut
+import atom_info as af
 
 
 def energy2wavelength_a(energy_kev: float) -> float:
@@ -237,6 +237,49 @@ def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
 
     return k_vectors
 
+def apply_aberattions_to_kins(kins, amplitude_profile=None, phase_aberration=None):
+    """
+    Generate incoming k-vectors for a convergent beam, including pupil function effects.
+
+    Parameters:
+    - kins: the kin vector 
+    - amplitude_profile: Function describing the amplitude distribution across the pupil.
+                         Takes (kx_norm, ky_norm) as input and returns amplitude.
+    - phase_aberration: Function describing the phase aberrations across the pupil.
+                        Takes (kx_norm, ky_norm) as input and returns phase (in radians).
+
+    Returns:
+    - k_vectors: Array of shape (num_vectors, 3) with each row as a k-vector.
+    - weights: Array of shape (num_vectors,) with amplitude and phase weights for each k-vector.
+    """
+    
+    kx = kins[:,0]
+    ky = kins[:,1]
+
+    # Initialize weights (amplitude and phase)
+    weights = np.ones(kins.shape[0], dtype=complex)
+
+    # Apply amplitude profile if provided
+    if amplitude_profile is not None:
+        weights *= amplitude_profile(kx, ky)
+
+    # Apply phase aberrations if provided
+    if phase_aberration is not None:
+        phase = phase_aberration(kx, ky)
+        weights *= np.exp(1j * phase)  # Multiply by complex phase factor
+
+    # Combine k-vectors and weights
+    return kins, weights
+
+
+def defocus_aberration(kx_norm, ky_norm, defocus_coeff=1.0):
+    return defocus_coeff * (kx_norm**2 + ky_norm**2)
+
+def gaussian_amplitude(kx_norm, ky_norm, sigma=0.5):
+    return np.exp(-(kx_norm**2 + ky_norm**2) / (2 * sigma**2))
+
+
+
 def crystal_to_detector_pixels_vector(detector_distance, pixel_size, detector_size, wavelength):
     
     """
@@ -340,38 +383,6 @@ def generate_detector_image(intensities, kouts, detector_size, pixel_size, dista
 
     return detector_image
 
-def reverse_kins_to_pixels(kins, pixel_size, detector_distance, detector_shape):
-    """
-    Reverse map k_out vectors to detector pixel indices.
-
-    Args:
-        kouts (np.ndarray): Array of k_out vectors (N, 3), normalized.
-        pixel_size (float): Pixel size in micrometers.
-        detector_distance (float): Distance from the crystal to the center of the detector in meters.
-        detector_shape: Tuple (num_rows, num_cols) of the detector
-    Returns:
-        np.ndarray: Array of pixel indices for k_out vectors.
-    """
-
-    cen_x,cen_y = np.array(detector_shape)/2
-    
-    # pixel size in meters
-    pixel_size = np.array(pixel_size)
-    kins = kins / np.linalg.norm(kins, axis=1)[:, np.newaxis]
-    
-    # Reverse mapping to pixel indices
-    x_pixels = (kins[:, 0] / kins[:, 2]) * detector_distance / pixel_size + cen_x
-    y_pixels = (kins[:, 1] / kins[:, 2]) * detector_distance / pixel_size + cen_y
-    
-    # Convert to integer pixel indices
-    x_pixel_indices = np.floor(x_pixels).astype(int)
-    y_pixel_indices = np.floor(y_pixels).astype(int)
-
-    coord = np.vstack((x_pixel_indices, y_pixel_indices)).T
-    print(coord.shape)
-    
-    return coor
-
 def calc_ttheta_from_kout(kouts, kin_avg):
 
     """
@@ -429,7 +440,7 @@ def reverse_kins_to_pixels(kins, pixel_size, detector_distance, central_pixel):
     Args:
         kouts (np.ndarray): Array of k_out vectors (N, 3), normalized.
         pixel_size (float): Pixel size in micrometers.
-        detector_distance (float): Distance from the crystal to the center of the detector in meters.
+        detector_distance (float): Distance from the crystal to the center of the detector in micro meters.
         detector_shape: Tuple (num_rows, num_cols) of the detector
     Returns:
         np.ndarray: Array of pixel indices for k_out vectors.
@@ -493,6 +504,54 @@ def compute_vectors(coordinates, detector_distance, pixel_size, central_pixel, w
 
     return ks
     
+
+def reverse_kouts_to_pixels(kouts, intensiies, detector_size, pixel_size, detector_distance):
+    """
+    Reverse map k_out vectors to detector pixel indices.
+
+    Args:
+        kouts (np.ndarray): Array of k_out vectors (N, 3), normalized.
+        detector_size (tuple): Detector dimensions in meters (width, height).
+        pixel_size (tuple): Pixel size in micrometers (width, height).
+        detector_distance (float): Distance from the crystal to the center of the detector in meters.
+
+    Returns:
+        np.ndarray: Array of pixel indices for k_out vectors.
+    """
+    
+    # Convert pixel size to meters
+    pixel_size = np.array(pixel_size) * 1e-6
+    
+    # Compute number of pixels in each dimension
+    nx, ny = (detector_size / pixel_size).astype(int)
+
+    # Reverse mapping to pixel indices
+    x_pixels = (kouts[:, 0] / kouts[:, 2]) * detector_distance / pixel_size[0] + nx / 2
+    y_pixels = (kouts[:, 1] / kouts[:, 2]) * detector_distance / pixel_size[1] + ny / 2
+
+
+    
+    # Convert to integer pixel indices using rounding
+    x_pixel_indices = np.floor(x_pixels).astype(int)
+    y_pixel_indices = np.floor(y_pixels).astype(int)
+
+    # Verify indices are within bounds
+    # Clip indices and log out-of-bounds
+    out_of_bounds = (x_pixel_indices < 0) | (x_pixel_indices >= nx) | \
+                    (y_pixel_indices < 0) | (y_pixel_indices >= ny)
+                    
+    in_bounds_mask = (x_pixel_indices >= 0) & (x_pixel_indices < nx) & \
+                (y_pixel_indices >= 0) & (y_pixel_indices < ny)
+
+    
+    x_pixel_indices = x_pixel_indices[in_bounds_mask]
+    y_pixel_indices = y_pixel_indices[in_bounds_mask]
+
+    intensiies = intensiies[in_bounds_mask]
+
+
+        
+    return np.vstack((y_pixel_indices, x_pixel_indices)).T, intensiies
 
 
 # Rotation matrix from Euler angles
