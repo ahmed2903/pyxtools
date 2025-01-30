@@ -237,8 +237,6 @@ def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
 
     return k_vectors
 
-
-
 def crystal_to_detector_pixels_vector(detector_distance, pixel_size, detector_size, wavelength):
     
     """
