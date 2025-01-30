@@ -7,8 +7,8 @@ import itertools as it
 from multiprocessing import Pool, cpu_count
 from scipy.optimize import minimize
 
-import utils as ut
-import atom_info as af
+from . import utils as ut
+from . import atom_info as af
 
 
 def energy2wavelength_a(energy_kev: float) -> float:
@@ -223,17 +223,17 @@ def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
 
     # Converging effect: adjust directions to point towards the focal point
     # For simplicity, let's assume the focal point lies along the z-axis and the beam converges to (0, 0, focal_length)
-    # The beam is converging toward (0, 0, focal_length)
-    focal_point = np.array([0, 0, focal_length])
+    # # The beam is converging toward (0, 0, focal_length)
+    # focal_point = np.array([0, 0, focal_length])
 
-    # Normalize each vector to point towards the focal point
-    for i in range(num_vectors):
-        # Direction vector from the k-vector's point to the focal point
-        direction_to_focus = focal_point - k_vectors[i]
-        # Normalize this direction
-        direction_to_focus /= np.linalg.norm(direction_to_focus)
-        # Update k-vector direction (the normalized vector)
-        k_vectors[i] = direction_to_focus * k_magnitude
+    # # Normalize each vector to point towards the focal point
+    # for i in range(num_vectors):
+    #     # Direction vector from the k-vector's point to the focal point
+    #     direction_to_focus = focal_point - k_vectors[i]
+    #     # Normalize this direction
+    #     direction_to_focus /= np.linalg.norm(direction_to_focus)
+    #     # Update k-vector direction (the normalized vector)
+    #     k_vectors[i] = direction_to_focus * k_magnitude
 
     return k_vectors
 
@@ -529,8 +529,6 @@ def reverse_kouts_to_pixels(kouts, intensiies, detector_size, pixel_size, detect
     x_pixels = (kouts[:, 0] / kouts[:, 2]) * detector_distance / pixel_size[0] + nx / 2
     y_pixels = (kouts[:, 1] / kouts[:, 2]) * detector_distance / pixel_size[1] + ny / 2
 
-
-    
     # Convert to integer pixel indices using rounding
     x_pixel_indices = np.floor(x_pixels).astype(int)
     y_pixel_indices = np.floor(y_pixels).astype(int)
@@ -549,8 +547,6 @@ def reverse_kouts_to_pixels(kouts, intensiies, detector_size, pixel_size, detect
 
     intensiies = intensiies[in_bounds_mask]
 
-
-        
     return np.vstack((y_pixel_indices, x_pixel_indices)).T, intensiies
 
 
