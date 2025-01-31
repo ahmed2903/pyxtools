@@ -4,7 +4,7 @@ from scipy.interpolate import RegularGridInterpolator
 
 import vtk
 from vtk.util import numpy_support
-#from geometry  import X_Rot, Y_Rot, Z_Rot
+from geometry  import X_Rot, Y_Rot, Z_Rot
 
 def RotateVecs(data, axis, angle):
 	shp = data.shape[0:3]

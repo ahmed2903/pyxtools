@@ -150,3 +150,118 @@ def compute_detector_distance_from_NA(NA, pupil_size):
 def calculate_NA(focal_length, height):
 
     return np.sin(np.arctan(height/(2*focal_length)))
+
+def mag(A):
+    """
+    Returns the magnitude of vector A
+    If A has 2 dimensions, returns an array of magnitudes
+
+    E.G.
+     mag([1,1,1]) = 1.732
+     mag(array([[1,1,1],[2,2,2]]) = [1.732, 3.464]
+    """
+    A = np.asarray(A, dtype=float)
+    return np.sqrt(np.sum(A ** 2, axis=len(A.shape) - 1))
+
+def cart2sph(xyz, deg=False):
+    """
+    Convert coordinates in cartesian to coordinates in spherical
+    https://en.wikipedia.org/wiki/Spherical_coordinate_system
+    ISO convention used.
+        theta = angle from Z-axis to X-axis
+          phi = angle from X-axis to component in XY plane
+    :param xyz: [n*3] array of [x,y,z] coordinates
+    :param deg: if True, returns angles in degrees
+    :return: [r, theta, phi]
+    """
+    xyz = np.asarray(xyz).reshape(-1, 3)
+    xy = xyz[:, 0] ** 2 + xyz[:, 1] ** 2
+    r = mag(xyz)
+    theta = np.arctan2(np.sqrt(xy), xyz[:, 2])  # for elevation angle defined from Z-axis down
+    # theta = np.arctan2(xyz[:,2], np.sqrt(xy))  # for elevation angle defined from XY-plane up
+    phi = np.arctan2(xyz[:, 1], xyz[:, 0])
+    if deg:
+        theta = np.rad2deg(theta)
+        phi = np.rad2deg(phi)
+    return np.vstack((r, theta, phi)).T
+
+
+def sph2cart(r_th_ph, deg=False):
+    """
+    Convert coordinates in spherical to coordinates in cartesian
+    https://en.wikipedia.org/wiki/Spherical_coordinate_system
+        radius = sphere radius
+        theta = angle from Z-axis to X-axis
+          phi = angle from X-axis to component in XY plane
+    :param r_th_ph: [[radius, theta, phi], ]
+    :param deg: if True, converts theta, phi from degrees
+    :return: [x,y,z]
+    """
+    r, theta, phi = np.transpose(r_th_ph)
+    if deg:
+        theta = np.deg2rad(theta)
+        phi = np.deg2rad(phi)
+    x = r * np.sin(theta) * np.cos(phi)
+    y = r * np.sin(theta) * np.sin(phi)
+    z = r * np.cos(theta)
+    return np.vstack((x, y, z)).T
+
+def rot3D(A, alpha=0., beta=0., gamma=0.):
+    r"""Rotate 3D vector A by euler angles
+        A = rot3D(A,alpha=0.,beta=0.,gamma=0.)
+       where alpha = angle from X axis to Y axis (Yaw)
+             beta  = angle from Z axis to X axis (Pitch)
+             gamma = angle from Y axis to Z axis (Roll)
+       angles in degrees
+       In a right-handed coordinate system.
+           Z
+          /|\
+           |
+           |________\Y
+           \        /
+            \
+            _\/X
+    """
+
+    A = np.asarray(A, dtype=float).reshape((-1, 3))
+
+    # Convert to radians
+    alpha = alpha * np.pi / 180.
+    beta = beta * np.pi / 180.
+    gamma = gamma * np.pi / 180.
+
+    # Define 3D rotation matrix
+    Rx = np.array([[1, 0, 0], [0, np.cos(gamma), -np.sin(gamma)], [0., np.sin(gamma), np.cos(gamma)]])
+    Ry = np.array([[np.cos(beta), 0., np.sin(beta)], [0., 1., 0.], [-np.sin(beta), 0., np.cos(beta)]])
+    Rz = np.array([[np.cos(alpha), -np.sin(alpha), 0.], [np.sin(alpha), np.cos(alpha), 0.], [0., 0., 1.]])
+    R = np.dot(np.dot(Rx, Ry), Rz)
+
+    # Rotate coordinates
+    return np.dot(R, A.T).T
+
+
+
+def plane_intersection(line_point, line_direction, plane_point, plane_normal):
+    """
+    Calculate the point at which a line intersects a plane
+    :param line_point: [x,y],z] some coordinate on line
+    :param line_direction: [dx,dy],dz] the direction of line
+    :param plane_point:  [x,y],z] some coordinate on the plane
+    :param plane_normal: [dx,dy],dz] the normal vector of the plane
+    :return: [x,y],z]
+    """
+
+    line_point = np.asarray(line_point)
+    plane_point = np.asarray(plane_point)
+    line_direction = np.asarray(line_direction) / np.sqrt(np.sum(np.square(line_direction)))
+    plane_normal = np.asarray(plane_normal) / np.sqrt(np.sum(np.square(plane_normal)))
+
+    u1 = np.dot(plane_normal, plane_point - line_point)
+    u2 = np.dot(plane_normal, line_direction)
+
+    if u2 == 0:
+        print('Plane is parallel to line')
+        return None
+    u = u1 / u2
+    intersect = line_point + u*line_direction
+    return intersect

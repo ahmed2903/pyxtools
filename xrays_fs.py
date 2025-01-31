@@ -29,6 +29,42 @@ def energy2wavelength_a(energy_kev: float) -> float:
 
     return wavelength_a
 
+def wavelength_a2energy(wavelength):
+    """
+    Converts wavelength in A to energy in keV
+     Energy [keV] = h*c/L = 12.3984 / lambda [A]
+    """
+
+    # SI: E = hc/lambda
+    lam = wavelength * ut.Ang
+    E = ut.hplanck * ut.c / lam
+
+    # Electron Volts:
+    Energy = E / ut.echarge
+    return Energy / 1000.0
+
+def qmag2dspace(qmag):
+    """
+    Calculate d-spacing from |Q|
+         dspace = q2dspace(Qmag)
+    """
+    return 2 * np.pi / qmag
+
+
+def dspace2qmag(dspace):
+    """
+    Calculate d-spacing from |Q|
+         Qmag = q2dspace(dspace)
+    """
+    return 2 * np.pi / dspace
+
+def wavevector(energy_kev=None, wavelength=None):
+    """Return wavevector = 2pi/lambda"""
+    if wavelength is None:
+        wavelength = energy2wavelength_a(energy_kev)
+    return 2 * np.pi / wavelength
+
+
 def calc_qmag(twotheta:float, **kwargs):
     """
     Calculate |Q| [A^-1] at a particular 2-theta (deg) for energy [keV]
@@ -237,48 +273,6 @@ def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
 
     return k_vectors
 
-def apply_aberattions_to_kins(kins, amplitude_profile=None, phase_aberration=None):
-    """
-    Generate incoming k-vectors for a convergent beam, including pupil function effects.
-
-    Parameters:
-    - kins: the kin vector 
-    - amplitude_profile: Function describing the amplitude distribution across the pupil.
-                         Takes (kx_norm, ky_norm) as input and returns amplitude.
-    - phase_aberration: Function describing the phase aberrations across the pupil.
-                        Takes (kx_norm, ky_norm) as input and returns phase (in radians).
-
-    Returns:
-    - k_vectors: Array of shape (num_vectors, 3) with each row as a k-vector.
-    - weights: Array of shape (num_vectors,) with amplitude and phase weights for each k-vector.
-    """
-    
-    kx = kins[:,0]
-    ky = kins[:,1]
-
-    # Initialize weights (amplitude and phase)
-    weights = np.ones(kins.shape[0], dtype=complex)
-
-    # Apply amplitude profile if provided
-    if amplitude_profile is not None:
-        weights *= amplitude_profile(kx, ky)
-
-    # Apply phase aberrations if provided
-    if phase_aberration is not None:
-        phase = phase_aberration(kx, ky)
-        weights *= np.exp(1j * phase)  # Multiply by complex phase factor
-
-    # Combine k-vectors and weights
-    return kins, weights
-
-
-def defocus_aberration(kx_norm, ky_norm, defocus_coeff=1.0):
-    return defocus_coeff * (kx_norm**2 + ky_norm**2)
-
-def gaussian_amplitude(kx_norm, ky_norm, sigma=0.5):
-    return np.exp(-(kx_norm**2 + ky_norm**2) / (2 * sigma**2))
-
-
 
 def crystal_to_detector_pixels_vector(detector_distance, pixel_size, detector_size, wavelength):
     
@@ -352,7 +346,6 @@ def gen_qvectors_from_kins_kouts(kins, kouts):
     k_in = kins[k_in_indices]
     
     return difference_vectors, k_out, k_in
-
 
 
 def generate_detector_image(intensities, kouts, detector_size, pixel_size, distance):
@@ -643,5 +636,210 @@ def compute_kout_from_G_kin(G_arr, kin_arr):
     Garr_indices = np.repeat(np.arange(len(G_arr)), len(kin_arr))
     
     return k_out, kin_indices, Garr_indices
+
+
+def apply_aberattions_to_kins(kins, amplitude_profile=None, phase_aberration=None):
+    """
+    Generate incoming k-vectors for a convergent beam, including pupil function effects.
+
+    Parameters:
+    - kins: the kin vector 
+    - amplitude_profile: Function describing the amplitude distribution across the pupil.
+                         Takes (kx_norm, ky_norm) as input and returns amplitude.
+    - phase_aberration: Function describing the phase aberrations across the pupil.
+                        Takes (kx_norm, ky_norm) as input and returns phase (in radians).
+
+    Returns:
+    - k_vectors: Array of shape (num_vectors, 3) with each row as a k-vector.
+    - weights: Array of shape (num_vectors,) with amplitude and phase weights for each k-vector.
+    """
+    
+    kx = kins[:,0]
+    ky = kins[:,1]
+
+    # Initialize weights (amplitude and phase)
+    weights = np.ones(kins.shape[0], dtype=complex)
+
+    # Apply amplitude profile if provided
+    if amplitude_profile is not None:
+        weights *= amplitude_profile(kx, ky)
+
+    # Apply phase aberrations if provided
+    if phase_aberration is not None:
+        phase = phase_aberration(kx, ky)
+        weights *= np.exp(1j * phase)  # Multiply by complex phase factor
+
+    # Combine k-vectors and weights
+    return kins, weights
+
+# Phase Aberrations:
+def defocus_aberration(kx, ky, defocus_coeff):
+    """
+    Defocus aberration: quadratic phase error.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - defocus_coeff: Coefficient controlling the strength of defocus.
+    
+    Returns:
+    - Phase error (in radians).
+    """
+    return defocus_coeff * (kx**2 + ky**2)
+
+
+def spherical_aberration(kx, ky, spherical_coeff):
+    """
+    Spherical aberration: quartic phase error.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - spherical_coeff: Coefficient controlling the strength of spherical aberration.
+    
+    Returns:
+    - Phase error (in radians).
+    """
+    return spherical_coeff * (kx**2 + ky**2)**2
+
+def coma_aberration(kx, ky, coma_coeff):
+    """
+    Coma aberration: linear in one direction, quadratic in the other.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - coma_coeff: Coefficient controlling the strength of coma.
+    
+    Returns:
+    - Phase error (in radians).
+    """
+    return coma_coeff * kx * (kx**2 + ky**2)
+
+def astigmatism_aberration(kx, ky, astigmatism_coeff):
+    """
+    Astigmatism aberration: quadratic phase error with asymmetry.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - astigmatism_coeff: Coefficient controlling the strength of astigmatism.
+    
+    Returns:
+    - Phase error (in radians).
+    """
+    return astigmatism_coeff * (kx**2 - ky**2)
+
+def random_error_profile(kx, ky, amplitude=0.1):
+    """
+    Random layer placement error.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - amplitude: Amplitude of the random error.
+    
+    Returns:
+    - Random phase error (in radians).
+    """
+    return amplitude * np.random.normal(size=kx.shape)
+
+def combined_aberrations(kx, ky, coefficients):
+    """
+    Combine multiple aberrations.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - coefficients: Dictionary of aberration coefficients.
+    
+    Returns:
+    - Total phase error (in radians).
+    """
+    phase_error = 0.0
+    phase_error += defocus_aberration(kx, ky, coefficients['defocus'])
+    phase_error += spherical_aberration(kx, ky, coefficients['spherical'])
+    phase_error += coma_aberration(kx, ky, coefficients['coma'])
+    phase_error += astigmatism_aberration(kx, ky, coefficients['astigmatism'])
+    return phase_error
+
+
+#Amplotude Profiles
+def uniform_amplitude(kx, ky):
+    """
+    Uniform amplitude profile: constant intensity across the lens.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    
+    Returns:
+    - Amplitude (constant value of 1).
+    """
+    return np.ones_like(kx)
+
+def gaussian_amplitude(kx, ky, sigma=0.5):
+    """
+    Gaussian amplitude profile: smooth falloff in intensity.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - sigma: Width of the Gaussian profile.
+    
+    Returns:
+    - Amplitude (Gaussian distribution).
+    """
+    return np.exp(-(kx**2 + ky**2) / (2 * sigma**2))
+
+def top_hat_amplitude(kx, ky, radius=1.0):
+    """
+    Top-hat amplitude profile: sharp cutoff at the edges.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - radius: Radius of the lens aperture.
+    
+    Returns:
+    - Amplitude (1 inside the aperture, 0 outside).
+    """
+    r = np.sqrt(kx**2 + ky**2)
+    return np.where(r <= radius, 1.0, 0.0)
+
+
+def apodized_amplitude(kx, ky, sigma=0.5):
+    """
+    Apodized amplitude profile: smooth tapering at the edges.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - sigma: Width of the apodization profile.
+    
+    Returns:
+    - Amplitude (apodized distribution).
+    """
+    r = np.sqrt(kx**2 + ky**2)
+    return np.exp(-(r**2) / (2 * sigma**2)) * (1 - r**2)
+
+def ring_amplitude(kx, ky, radius=0.7, width=0.1):
+    """
+    Ring-shaped amplitude profile: intensity concentrated in a ring.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - radius: Radius of the ring.
+    - width: Width of the ring.
+    
+    Returns:
+    - Amplitude (ring-shaped distribution).
+    """
+    r = np.sqrt(kx**2 + ky**2)
+    return np.exp(-((r - radius)**2) / (2 * width**2))
+
+def absorption_amplitude(kx, ky, absorption_coeff=0.1):
+    """
+    Absorption-based amplitude profile: gradual decrease in intensity due to material absorption.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - absorption_coeff: Absorption coefficient.
+    
+    Returns:
+    - Amplitude (absorption-based distribution).
+    """
+    r = np.sqrt(kx**2 + ky**2)
+    return np.exp(-absorption_coeff * r)
 
 
