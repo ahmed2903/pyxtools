@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import scipy
 import pandas
 from math import sin, cos, pi
-
+from scipy.optimize import minimize
 
 hplanck = 6.62606868E-34  # Js  Plank consant
 c = 299792458  # m/s   Speed of light
