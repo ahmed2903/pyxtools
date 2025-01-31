@@ -3,9 +3,11 @@ import matplotlib.pyplot as plt
 import numpy as np 
 import matplotlib.patches as patches
 from matplotlib.widgets import Button, TextBox
-
+import pyvista as pv
 from matplotlib.patches import Rectangle
 from IPython.display import display
+from PIL import Image 
+
 
 def create_gif_from_arrays(array_list, gif_name, fps=10, cmap="viridis"):
     """
@@ -219,3 +221,37 @@ def plot_map_on_detector(detec_image, k_map, vmin, vmax, title, cmap, **kwargs):
         plt.savefig(name)
     
     plt.show()
+
+
+def plot_images_side_by_side(image1, image2, title1="Image 1", title2="Image 2", cmap1="gray", cmap2="gray", figsize=(10, 5), show = False):
+    """
+    Plots two images side by side.
+
+    Parameters:
+    - image1: First image (2D numpy array).
+    - image2: Second image (2D numpy array).
+    - title1: Title for the first image (default: "Image 1").
+    - title2: Title for the second image (default: "Image 2").
+    - cmap1: Colormap for the first image (default: "gray").
+    - cmap2: Colormap for the second image (default: "gray").
+    - figsize: Size of the figure (default: (10, 5)).
+    """
+    # Create a figure and subplots
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+    
+    # Plot the first image
+    im1 = axes[0].imshow(image1, cmap=cmap1)    
+    axes[0].set_title(title1)
+    #axes[0].axis('off')  # Hide axes
+    plt.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04)
+    
+    # Plot the second image
+    im2 = axes[1].imshow(image2, cmap=cmap2)
+    axes[1].set_title(title2)
+    #axes[1].axis('off')  # Hide axes
+    plt.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
+    
+    # Adjust layout and display
+    plt.tight_layout()
+    if show:
+        plt.show()

@@ -244,7 +244,11 @@ def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
 
     # Generate random directions within the cone defined by the NA
     phi = np.random.uniform(0, 2 * np.pi, num_vectors)  # Random azimuthal angle (0 to 2*pi)
-    theta = np.random.uniform(0, theta_max, num_vectors)  # Random polar angle (0 to theta_max)
+    
+    u = np.random.uniform(0,1, num_vectors)
+    theta = np.acos(1-u*(1-np.cos(theta_max)))
+    
+    #theta = np.random.uniform(0, theta_max, num_vectors)  # Random polar angle (0 to theta_max)
 
     # Convert spherical coordinates to Cartesian coordinates for the k-vectors
     k_vectors = np.zeros((num_vectors, 3))
@@ -758,7 +762,7 @@ def combined_aberrations(kx, ky, coefficients):
     return phase_error
 
 
-#Amplotude Profiles
+#Amplitude Profiles
 def uniform_amplitude(kx, ky):
     """
     Uniform amplitude profile: constant intensity across the lens.
@@ -843,3 +847,18 @@ def absorption_amplitude(kx, ky, absorption_coeff=0.1):
     return np.exp(-absorption_coeff * r)
 
 
+def combined_amplitude(kx, ky, profiles):
+    """
+    Combine multiple amplitude profiles.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - profiles: List of amplitude profile functions.
+    
+    Returns:
+    - Combined amplitude profile.
+    """
+    amplitude = 1.0
+    for profile in profiles:
+        amplitude *= profile(kx, ky)
+    return amplitude

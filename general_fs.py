@@ -556,7 +556,7 @@ def filter_elastic_scatt(kouts, kins, tolerance, wavelength):
     time6 = time.time()
     print(f"filtering took {time6 - time5 :.6f} seconds")
     
-    return filtered_kout, filtered_kin
+    return filtered_kout, filtered_kin, mask
     
 def calc_detector_max_angle(detector_size, detector_distance):
     
