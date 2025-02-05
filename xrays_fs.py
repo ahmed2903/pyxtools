@@ -169,6 +169,7 @@ def calculate_form_factor(real_lattice_vecs, q_vec, R_i):
     f_q = 2*pi * np.sum(phase, axis = -1) / V_cell 
     return f_q
 
+from joblib import Parallel, delayed
 def calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a):
     
     """
@@ -190,16 +191,15 @@ def calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a):
         fj = calculate_atomic_formfactor(atom, q_vec, wavelength_a)
         fjs.append(fj)
         
-    
+        
     fjs = np.array(fjs)
-
+    
     phase = np.exp(-1j*np.dot(q_vec,rj.T))
  
     t = fjs.T*phase
     s_q = np.sum(t, axis = -1)
     
     return s_q
-
 
 def calculate_scattering_amplitude(real_lattice_vecs, q_vec, R_i, atoms, rj_atoms, wavelength_a):
     
@@ -277,7 +277,6 @@ def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
 
     return k_vectors
 
-
 def crystal_to_detector_pixels_vector(detector_distance, pixel_size, detector_size, wavelength):
     
     """
@@ -351,7 +350,6 @@ def gen_qvectors_from_kins_kouts(kins, kouts):
     
     return difference_vectors, k_out, k_in
 
-
 def generate_detector_image(intensities, kouts, detector_size, pixel_size, distance):
     """
     Generate a 2D detector image based on scattering intensities and kouts, accounting for distance R.
@@ -374,9 +372,12 @@ def generate_detector_image(intensities, kouts, detector_size, pixel_size, dista
 
     detector_image = np.zeros((nx,ny))
 
-    # Populate the image array with intensities
-    for i in range(len(intensities)):
-        detector_image[indices[i,0], indices[i,1]] += intensities[i]
+
+    np.add.at(detector_image, (indices[:,0], indices[:,1]), intensities)
+    
+    ## Populate the image array with intensities
+    #for i in range(len(intensities)):
+    #    detector_image[indices[i,0], indices[i,1]] += intensities[i]
 
     return detector_image
 
@@ -501,7 +502,6 @@ def compute_vectors(coordinates, detector_distance, pixel_size, central_pixel, w
 
     return ks
     
-
 def reverse_kouts_to_pixels(kouts, intensiies, detector_size, pixel_size, detector_distance):
     """
     Reverse map k_out vectors to detector pixel indices.
@@ -531,10 +531,6 @@ def reverse_kouts_to_pixels(kouts, intensiies, detector_size, pixel_size, detect
     y_pixel_indices = np.floor(y_pixels).astype(int)
 
     # Verify indices are within bounds
-    # Clip indices and log out-of-bounds
-    out_of_bounds = (x_pixel_indices < 0) | (x_pixel_indices >= nx) | \
-                    (y_pixel_indices < 0) | (y_pixel_indices >= ny)
-                    
     in_bounds_mask = (x_pixel_indices >= 0) & (x_pixel_indices < nx) & \
                 (y_pixel_indices >= 0) & (y_pixel_indices < ny)
 
@@ -546,6 +542,70 @@ def reverse_kouts_to_pixels(kouts, intensiies, detector_size, pixel_size, detect
 
     return np.vstack((y_pixel_indices, x_pixel_indices)).T, intensiies
 
+from scipy.spatial.transform import Rotation as R
+def generate_spherical_cap(kout, kin, max_angle_deg, num_samples):
+    """
+    Generate a set of rotated kout vectors forming a spherical cap.
+    
+    kout: The initial kout vector
+    kin: The incident wavevector
+    max_angle_deg: Maximum deflection angle from the central kout (defines the spherical cap size)
+    num_samples: Number of rotations to generate points on the cap
+
+    Returns:
+    - rotated_kouts: An array of kout vectors spanning a spherical cap
+    """
+    max_angle_rad = np.radians(max_angle_deg)
+
+    # Generate small-angle rotations in θ (polar) and φ (azimuthal)
+    theta_vals = np.linspace(0, max_angle_rad, num_samples)  # Polar angles
+    phi_vals = np.linspace(0, 2 * np.pi, num_samples)  # Azimuthal angles
+
+    rotated_kouts = []
+    
+    for theta in theta_vals:
+        for phi in phi_vals:
+            # Euler rotation matrix for the spherical cap
+            euler_angles = [theta, phi, 0]  # (ZXZ convention or other suitable convention)
+            rot_matrix = R.from_euler('ZXZ', euler_angles).as_matrix()
+
+            # Rotate kout
+            kout_rotated = rot_matrix @ kout.T
+            rotated_kouts.append(kout_rotated)
+
+    return np.array(rotated_kouts)
+
+from scipy.interpolate import RegularGridInterpolator
+def extract_scattering_amplitude(rotated_kouts, kin, rlvs_high_res, scat_amp_full):
+    """
+    Interpolates scattering amplitude values from precomputed data.
+    """
+    q_vectors = rotated_kouts - kin  # Compute q = kout - kin
+    sort_idx = np.lexsort((rlvs_high_res[:, 2], rlvs_high_res[:, 1], rlvs_high_res[:, 0]))
+    rlvs_high_res = rlvs_high_res[sort_idx]
+    # Interpolation function for efficient lookup
+    interp_func = RegularGridInterpolator(
+        (rlvs_high_res[:, 0], rlvs_high_res[:, 1], rlvs_high_res[:, 2]),
+        scat_amp_full,
+        method="linear",
+        bounds_error=False,
+        fill_value=0
+    )
+
+    return interp_func(q_vectors)
+
+def compute_image_for_kin(kin, pf, crystal, detector, max_angle_deg, num_samples, rlvs_high_res, scat_amp_full):
+    """ Compute detector image for one kin vector using a spherical cap. """
+    kout = crystal.gvectors + kin  # Central kout
+    rotated_kouts = generate_spherical_cap(kout, kin, max_angle_deg, num_samples)
+
+    # Extract scattering amplitude from precomputed data
+    scat_amp = pf * extract_scattering_amplitude(rotated_kouts, kin, rlvs_high_res, scat_amp_full)
+
+    # Generate detector image
+    image = generate_detector_image(np.abs(scat_amp), rotated_kouts, detector.size, detector.pixel_size, detector.distance)
+    
+    return image
 
 # Rotation matrix from Euler angles
 def rotation_matrix(alpha, beta, gamma):
@@ -690,7 +750,6 @@ def defocus_aberration(kx, ky, defocus_coeff):
     """
     return defocus_coeff * (kx**2 + ky**2)
 
-
 def spherical_aberration(kx, ky, spherical_coeff):
     """
     Spherical aberration: quartic phase error.
@@ -728,7 +787,7 @@ def astigmatism_aberration(kx, ky, astigmatism_coeff):
     Returns:
     - Phase error (in radians).
     """
-    return astigmatism_coeff * (kx**2 - ky**2)
+    return astigmatism_coeff * ( kx * ky )
 
 def random_error_profile(kx, ky, amplitude=0.1):
     """

@@ -41,11 +41,11 @@ def create_gif_from_arrays(array_list, gif_name, fps=10, cmap="viridis"):
         gif_name,
         save_all=True,
         append_images=frames[1:],
-        duration=1000 // fps,  # Duration per frame in milliseconds
+        duration=1000 // fps,  # in milliseconds
         loop=0
     )
     
-    # Cleanup temporary frame files (optional)
+    # Cleanup temporary frame files
     for file in frame_files:
         import os
         os.remove(file)

@@ -527,34 +527,26 @@ def filter_elastic_scatt(kouts, kins, tolerance, wavelength):
         kouts (_type_): _description_
         kins (_type_): _description_
     """
-    time1 = time.time()
     # Compute the magnitudes of kin and kout
     # kin_magnitudes = np.linalg.norm(kins, axis=1)  
     # kout_magnitudes = np.linalg.norm(kouts, axis=1)  
     
     # Parallelize norm computation
-    kout_magnitudes = np.concatenate(Parallel(n_jobs=-1)(delayed(compute_norms_chunk)(chunk) for chunk in np.array_split(kouts, 4)))
+    kout_magnitudes = np.concatenate(Parallel(n_jobs=-16)(delayed(compute_norms_chunk)(chunk) for chunk in np.array_split(kouts, 8)))
 
-    time2 = time.time()
-    
-    print(f"calculating magnitudes took {time2-time1:.6f} seconds ")
-    # Create a mask for filtering based on the magnitude condition
-    
+        
     magnitude = 2*math.pi / wavelength
-    
     
     magnitude_diff = np.abs(magnitude - kout_magnitudes)
     mask = magnitude_diff < tolerance
-    
-    print("mask shape is ")
-    print(mask.shape)
-    
-    time5 = time.time()
+        
     # Apply the mask to get the filtered kin and kout pairs
-    filtered_kin = kins[mask]
+    if kins.shape[0] > 1:
+        filtered_kin = kins[mask]
+    else: 
+        filtered_kin = kins
+        
     filtered_kout = kouts[mask]
-    time6 = time.time()
-    print(f"filtering took {time6 - time5 :.6f} seconds")
     
     return filtered_kout, filtered_kin, mask
     

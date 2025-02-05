@@ -4,7 +4,7 @@ import scipy
 import pandas as pd
 from math import sin, cos, pi, sqrt
 import itertools as it
-
+import time 
 from .general_fs import pad
 
 def calc_realspace_lattice_vectors(uc_size, uc_angles) -> np.ndarray:
@@ -262,7 +262,8 @@ def gen_rlvs_for_one_hkl(hkl:tuple, recip_vecs, grid_points, range_scale, ravel 
     b1 = np.linalg.norm(recip_vecs[0])
     b2 = np.linalg.norm(recip_vecs[1])
     b3 = np.linalg.norm(recip_vecs[2])
-        
+    
+    
     # Define h, k, l ranges
     h = np.linspace(-1, 1, grid_points) * b1 * range_scale
     k = np.linspace(-1, 1, grid_points) * b2 * range_scale 
@@ -270,6 +271,8 @@ def gen_rlvs_for_one_hkl(hkl:tuple, recip_vecs, grid_points, range_scale, ravel 
     
     # Generate 3D grid of q-space
     h_grid, k_grid, l_grid = np.meshgrid(h, k, l, indexing="ij")
+    
+    
     
     # Calculate qx, qy, qz components
     qx = h_grid 
@@ -281,7 +284,6 @@ def gen_rlvs_for_one_hkl(hkl:tuple, recip_vecs, grid_points, range_scale, ravel 
     
     if ravel:
         q_vectors = q_vectors.reshape(-1,3)
-    
     return q_vectors, (h,k,l)
     
 
