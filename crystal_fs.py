@@ -351,7 +351,42 @@ def cuboid_normals(arraysize):
     
     return normals
 
+def hexagonal_normals(arraysize):
+    """
+    Generate normal vectors for a hexagonal prism.
 
+    Args:
+        arraysize (tuple): (X, Y, Z) dimensions of the crystal.
+
+    Returns:
+        list: Normals defining the hexagonal prism.
+    """
+    X, Y, Z = arraysize
+    dX = 30  # Buffer distance from edges
+    dZ = 30  # Height buffer
+    X2 = X / 2 - dX  # Distance from center to hexagon vertices
+    Y2 = Y / 2 - dX
+    Z2 = Z - dZ  # Top and bottom face Z-coordinates
+
+    # Compute hexagonal vertices in the XY plane
+    angles = np.linspace(0, 2 * np.pi, 7)[:-1]  # 6 points (hexagon)
+    hexagon_vertices = np.array([[X2 * np.cos(a) + X / 2, Y2 * np.sin(a) + Y / 2] for a in angles])
+
+    normals = []
+
+    # Top and bottom hexagonal faces
+    for v in hexagon_vertices:
+        normals.append([v[0], v[1], dZ, v[0], v[1], dZ - 1])  # Bottom face
+        normals.append([v[0], v[1], Z2, v[0], v[1], Z2 + 1])  # Top face
+
+    # Side faces (connect top and bottom hexagons)
+    for i in range(6):
+        x0, y0 = hexagon_vertices[i]
+        x1, y1 = hexagon_vertices[(i + 1) % 6]  # Next vertex in sequence
+        normals.append([x0, y0, dZ, x1, y1, dZ])  # Bottom edge
+        normals.append([x0, y0, Z2, x1, y1, Z2])  # Top edge
+
+    return normals
 
 def compute_shape_transform(shape_array, grid_spacing):
     
