@@ -119,6 +119,91 @@ def qmag2ttheta(qmag: float, **kwargs) -> float:
 
     return ttheta
 
+def compute_phase_in_batches(q_vec, rj, batch_size=1000):
+    """
+    Compute phase = exp(-1j * dot(q_vec, rj.T)) in batches to save memory.
+
+    Args:
+        q_vec (ndarray): Array of shape (N, 3) containing wavevectors.
+        rj (ndarray): Array of shape (M, 3) containing atomic positions.
+        batch_size (int): Number of rows in q_vec to process at a time.
+
+    Returns:
+        ndarray: Phase matrix of shape (N, M) computed in batches.
+    """
+    N, M = q_vec.shape[0], rj.shape[0]
+    phase = np.zeros((N, M), dtype=np.complex128)  # Allocate output array
+
+    for i in range(0, N, batch_size):
+        batch_end = min(i + batch_size, N)  # Handle last batch correctly
+        q_batch = q_vec[i:batch_end]  # Extract batch
+        phase[i:batch_end] = np.exp(-1j * np.einsum('ij,kj->ik', q_batch, rj))  # Efficient dot product
+
+    return phase
+
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
+def compute_phase_batch(q_batch, rj):
+    """Computes a batch of phase values."""
+    return np.exp(-1j * np.einsum('ij,kj->ik', q_batch, rj))
+
+def compute_phase_multithreaded(q_vec, rj, batch_size=1000, num_threads=4):
+    """
+    Compute phase = exp(-1j * dot(q_vec, rj.T)) using multithreading for large arrays.
+
+    Args:
+        q_vec (ndarray): (N, 3) wavevectors.
+        rj (ndarray): (M, 3) atomic positions.
+        batch_size (int): Number of rows in q_vec to process per batch.
+        num_threads (int): Number of threads to use.
+
+    Returns:
+        ndarray: (N, M) phase matrix computed in parallel.
+    """
+    N = q_vec.shape[0]
+    phase = np.zeros((N, rj.shape[0]), dtype=np.complex128)  # Allocate output
+
+    # Define batch ranges
+    batch_ranges = [(i, min(i + batch_size, N)) for i in range(0, N, batch_size)]
+
+    # Run multithreading
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        results = list(executor.map(lambda b: compute_phase_batch(q_vec[b[0]:b[1]], rj), batch_ranges))
+
+    # # Merge results into phase array
+    # for (start, end), res in zip(batch_ranges, results):
+    #     phase[start:end] = res  # Assign computed batches
+
+    phase = np.concatenate(results)
+    return phase
+
+def compute_phase_parallel(q_vec, rj, batch_size=1000, n_jobs=4):
+    """
+    Compute phase = exp(-1j * dot(q_vec, rj.T)) using joblib for parallel processing.
+
+    Args:
+        q_vec (ndarray): (N, 3) wavevectors.
+        rj (ndarray): (M, 3) atomic positions.
+        batch_size (int): Number of rows in q_vec to process per batch.
+        n_jobs (int): Number of jobs to run in parallel.
+
+    Returns:
+        ndarray: (N, M) phase matrix computed in parallel.
+    """
+    N = q_vec.shape[0]
+
+    # Define batch ranges
+    batch_ranges = [(i, min(i + batch_size, N)) for i in range(0, N, batch_size)]
+
+    # Run parallel processing using joblib
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(compute_phase_batch)(q_vec[start:end], rj) for start, end in batch_ranges
+    )
+
+    # Merge results into a single array
+    phase = np.concatenate(results)
+    return phase
+
 def calculate_atomic_formfactor(atom: str, qvec: np.ndarray, wavelength_a: float):
 
     """
@@ -164,14 +249,17 @@ def calculate_form_factor(real_lattice_vecs, q_vec, R_i):
     
     # Volume of unit cell
     V_cell = np.dot(real_lattice_vecs[0], np.cross(real_lattice_vecs[1], real_lattice_vecs[2])) 
-    phase = np.exp(-1j*np.dot(q_vec,R_i.T))
+    
+    #phase = np.exp(-1j * np.einsum('ij,kj->ik', q_vec, R_i))
+    phase = compute_phase_parallel(q_vec, R_i, batch_size=10000, n_jobs=8)
+
+    #phase = np.exp(-1j*np.dot(q_vec,R_i.T))
                    
     f_q = 2*pi * np.sum(phase, axis = -1) / V_cell 
     return f_q
 
 from joblib import Parallel, delayed
 def calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a):
-    
     """
     The structure factor at q_vec, followiung s_q = Sum_{atoms in unit cell} f_j * exp[-1j* q.r_j]
 
@@ -185,16 +273,17 @@ def calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a):
         np.ndarray: Structure factor for every q_vec
     """
     rj = np.array(rj_atoms)
-    
     fjs = []
     for atom in atoms:
         fj = calculate_atomic_formfactor(atom, q_vec, wavelength_a)
         fjs.append(fj)
         
-        
     fjs = np.array(fjs)
-    
-    phase = np.exp(-1j*np.dot(q_vec,rj.T))
+
+    phase = compute_phase_parallel(q_vec, rj, batch_size=10000, n_jobs=8)
+
+    #phase = np.exp(-1j * np.einsum('ij,kj->ik', q_vec, rj))
+    #phase = np.exp(-1j*np.dot(q_vec,rj.T))
  
     t = fjs.T*phase
     s_q = np.sum(t, axis = -1)
