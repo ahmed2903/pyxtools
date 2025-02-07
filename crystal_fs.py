@@ -287,7 +287,7 @@ def gen_rlvs_for_one_hkl(hkl:tuple, recip_vecs, grid_points, range_scale, ravel 
     return q_vectors, (h,k,l)
     
 
-def set_shape_array(arraysize, normals):
+def set_shape_array(arraysize, normals, padding= (2,2,2)):
     """
     Create a shape function array representing the crystal's geometry.
 
@@ -299,12 +299,25 @@ def set_shape_array(arraysize, normals):
     Returns:
         None: The indices, and the shape array
     """
-    # Initialize the shape array
-    shape_array = np.zeros(arraysize, dtype=np.uint8)  # Binary array to represent shape (0 or 1)
-    n_voxels = np.prod(arraysize)
     
-    # Generate 3D grid indices for the shape array
-    indices = np.transpose(np.unravel_index(np.arange(n_voxels), arraysize))
+    # Apply padding to array size
+    padded_size = (arraysize[0] + 2 * padding[0],
+                   arraysize[1] + 2 * padding[1],
+                   arraysize[2] + 2 * padding[2])
+    
+    # Initialize the shape array
+    shape_array = np.zeros(padded_size, dtype=np.uint8)  # Binary array to represent shape (0 or 1)
+    
+    
+    # n_voxels = np.prod(arraysize)
+    
+    # # Generate 3D grid indices for the shape array
+    # indices = np.transpose(np.unravel_index(np.arange(n_voxels), arraysize))
+    
+    indices = np.stack(np.meshgrid(np.arange(arraysize[0]),
+                                   np.arange(arraysize[1]),
+                                   np.arange(arraysize[2]),
+                                   indexing='ij'), -1).reshape(-1, 3)
     
     # Process each surface defined by normals
     for surface in normals:
@@ -323,9 +336,14 @@ def set_shape_array(arraysize, normals):
     # Store the shape array
     shape_array = np.ascontiguousarray(shape_array, dtype=np.uint8)
     
-    shape_array = pad(shape_array, 2,2,2,2,2,2)
-    
-    return indices, shape_array
+    shape_array = pad(shape_array,padding[0], padding[0],
+                                  padding[1], padding[1],
+                                  padding[2], padding[2])
+
+    # Adjust indices to reflect padding shift
+    padded_indices = indices + np.array(padding)  # Shift indices to match padded space
+
+    return padded_indices, shape_array
 
 def cuboid_normals(arraysize):
     
