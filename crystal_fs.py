@@ -306,7 +306,7 @@ def set_shape_array(arraysize, normals, padding= (2,2,2)):
                    arraysize[2] + 2 * padding[2])
     
     # Initialize the shape array
-    shape_array = np.zeros(padded_size, dtype=np.uint8)  # Binary array to represent shape (0 or 1)
+    shape_array = np.zeros(arraysize, dtype=np.uint8)  # Binary array to represent shape (0 or 1)
     
     
     # n_voxels = np.prod(arraysize)
@@ -335,11 +335,11 @@ def set_shape_array(arraysize, normals, padding= (2,2,2)):
 
     # Store the shape array
     shape_array = np.ascontiguousarray(shape_array, dtype=np.uint8)
-    
+
     shape_array = pad(shape_array,padding[0], padding[0],
                                   padding[1], padding[1],
                                   padding[2], padding[2])
-
+    
     # Adjust indices to reflect padding shift
     padded_indices = indices + np.array(padding)  # Shift indices to match padded space
 
@@ -487,17 +487,27 @@ def define_interaction_volume(xi, xf, yi, yf, zi, zf, lattice_vectors):
 
     # Project indices onto the lattice
     lattice_coords = np.dot(indices, lattice_vectors)
+    return lattice_coords, indices
 
-    return lattice_coords
+def is_inside_crystal(illuminated_coords, crystal_coords):
+        
+        # Compute min/max boundaries of the crystal in each axis
+        mins = crystal_coords.min(axis=0)  # [xmin, ymin, zmin]
+        maxs = crystal_coords.max(axis=0)  # [xmax, ymax, zmax]
+        
+        # Check if points are inside all three coordinate bounds
+        mask = np.all((illuminated_coords >= mins) & (illuminated_coords < maxs), axis=1).astype(np.uint8)  
 
-def ptycho_scan_volumes(crystal_size, stride, beam_focus):
+        return mask
+
+def ptycho_scan_volumes(crystal_size, stride, beam_focus, padding=(0,0,0)):
     
     zi = 0
     zf = int(crystal_size[2])
     
     
-    xsize = crystal_size[0]
-    ysize = crystal_size[1]
+    xsize = crystal_size[0] + 2* padding[0]
+    ysize = crystal_size[1] + 2* padding[1]
     
     x_stride, y_stride = stride
     x_focus, y_focus = beam_focus

@@ -4,6 +4,7 @@ from scipy.interpolate import RegularGridInterpolator
 from scipy.optimize import curve_fit
 import time
 from scipy.ndimage import convolve
+import h5py 
 
 def ComputeAngles(a,b,c,hkl1,hkl2):
     
@@ -601,3 +602,26 @@ def convolve_reciprocal_lattice_with_grid(shape_transform, reciprocal_vectors, k
     combined_intensities = (reciprocal_intensities[:, None] * shape_values[None, :]).ravel()  # (M,)
 
     return output_points, combined_intensities
+
+
+def save_to_hdf5(file_path, scan_index, full_image, metadata):
+    """
+    Saves detector images and metadata efficiently in an HDF5 file.
+    
+    Args:
+        file_path (str): Path to the HDF5 file.
+        scan_index (int): Index of the current scan position.
+        full_image (ndarray): 2D detector image to be stored.
+        metadata (dict): Dictionary of metadata parameters.
+    """
+
+    with h5py.File(file_path, "a") as h5f:
+        # Create a group for this scan position
+        group = h5f.create_group(f"scan_{scan_index}")
+        
+        # Store the detector image
+        group.create_dataset("detector_image", data=full_image, compression="gzip", compression_opts=4)
+
+        # Save metadata as attributes
+        for key, value in metadata.items():
+            group.attrs[key] = str(value)  # Convert all metadata values to strings

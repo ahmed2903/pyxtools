@@ -231,13 +231,17 @@ def calculate_atomic_formfactor(atom: str, qvec: np.ndarray, wavelength_a: float
     inter = Z - 41.78214 * s**2  * ( (a1*np.exp(-b1*s**2)) + a2*np.exp(-b2*s**2) + a3*np.exp(-b3*s**2) +  a4*np.exp(-b4*s**2) ) +c
     return inter
 
-def calculate_form_factor(real_lattice_vecs, q_vec, R_i):
+def calculate_form_factor(real_lattice_vecs, q_vec, R_i, mask_Ri= None):
     
     """
     Input:
         real_lattice_vecs (np.ndarray): 3x3 array containing the real space lattice vectors
         q_vec (np.ndarray): The reciprocal lattice vectors to consider
         R_i (np.ndarray): the real space unit cell positions
+        
+        Optional:
+
+            mask_Ri (np.ndarray): Mask Ris outside the region of interest (for ptycho scan)
         
     Returns: 
         f_q (np.ndarray): the Form factor of the crystal
@@ -250,12 +254,18 @@ def calculate_form_factor(real_lattice_vecs, q_vec, R_i):
     # Volume of unit cell
     V_cell = np.dot(real_lattice_vecs[0], np.cross(real_lattice_vecs[1], real_lattice_vecs[2])) 
     
+    if mask_Ri is not None:
+        R_i = R_i * mask_Ri[:,np.newaxis]
+    
     #phase = np.exp(-1j * np.einsum('ij,kj->ik', q_vec, R_i))
     phase = compute_phase_parallel(q_vec, R_i, batch_size=10000, n_jobs=8)
 
     #phase = np.exp(-1j*np.dot(q_vec,R_i.T))
-                   
-    f_q = 2*pi * np.sum(phase, axis = -1) / V_cell 
+
+    scattering_strength_coeff = (np.sum(mask_Ri) / mask_Ri.shape[0]) # FIX ME!
+    
+    f_q = 2*pi * np.sum(phase, axis = -1) / V_cell * scattering_strength_coeff
+    
     return f_q
 
 from joblib import Parallel, delayed
@@ -279,7 +289,6 @@ def calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a):
         fjs.append(fj)
         
     fjs = np.array(fjs)
-
     phase = compute_phase_parallel(q_vec, rj, batch_size=10000, n_jobs=8)
 
     #phase = np.exp(-1j * np.einsum('ij,kj->ik', q_vec, rj))
@@ -287,10 +296,9 @@ def calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a):
  
     t = fjs.T*phase
     s_q = np.sum(t, axis = -1)
-    
     return s_q
 
-def calculate_scattering_amplitude(real_lattice_vecs, q_vec, R_i, atoms, rj_atoms, wavelength_a):
+def calculate_scattering_amplitude(real_lattice_vecs, q_vec, R_i, atoms, rj_atoms, wavelength_a, mask_Ri = None):
     
     """
     Calculates the scattering amplitudes F(q) = S(q) [the structure factor] * f(q) [The form factor]
@@ -306,7 +314,7 @@ def calculate_scattering_amplitude(real_lattice_vecs, q_vec, R_i, atoms, rj_atom
     Returns:
         np.ndarray: the scattering amplitude
     """
-    form_factor = calculate_form_factor(real_lattice_vecs, q_vec, R_i)
+    form_factor = calculate_form_factor(real_lattice_vecs, q_vec, R_i, mask_Ri)
     structure_factor = calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a)
     scattering_amp = form_factor*structure_factor
     
