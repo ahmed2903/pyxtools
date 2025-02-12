@@ -252,7 +252,7 @@ def gen_RLS_from_maxhkl_maskOrigin(max_hkl, grid_points, a, b, c, threshold=0.1,
 
     return q_vectors
 
-def gen_rlvs_for_one_hkl(hkl:tuple, recip_vecs, grid_points, range_scale, ravel = True):
+def gen_rlvs_for_one_hkl(hkl:tuple, recip_vecs, grid_points= None, range_scale= 0.49, ravel = True):
     
     h,k,l = hkl
     
@@ -263,7 +263,6 @@ def gen_rlvs_for_one_hkl(hkl:tuple, recip_vecs, grid_points, range_scale, ravel 
     b2 = np.linalg.norm(recip_vecs[1])
     b3 = np.linalg.norm(recip_vecs[2])
     
-    
     # Define h, k, l ranges
     h = np.linspace(-1, 1, grid_points) * b1 * range_scale
     k = np.linspace(-1, 1, grid_points) * b2 * range_scale 
@@ -271,8 +270,6 @@ def gen_rlvs_for_one_hkl(hkl:tuple, recip_vecs, grid_points, range_scale, ravel 
     
     # Generate 3D grid of q-space
     h_grid, k_grid, l_grid = np.meshgrid(h, k, l, indexing="ij")
-    
-    
     
     # Calculate qx, qy, qz components
     qx = h_grid 
