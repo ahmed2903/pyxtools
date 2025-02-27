@@ -6,8 +6,14 @@ import requests
 import concurrent.futures
 import h5py
 import os
+from skimage.measure import shannon_entropy
+from numpy.fft import fftshift, ifftshift, fft2, ifft2
+from scipy.ndimage import zoom 
+from joblib import Parallel, delayed
 
 from . import xrays_fs as xf
+import general_fs as gf
+
 
 def load_hdf_roi(data_folder, f_name, roi):
     """
@@ -295,3 +301,152 @@ def get_kin(array, kins, roi, mask_val, ttheta_real, crop, det_focus_distance, d
 
     return map_kins, ki, opt_angles
 
+
+def downsample_array(arr, new_shape):
+    """
+    Downsample a 2D array by taking mean of non-overlapping rectangular blocks
+    
+    Args:
+        arr (np.ndarray): Input 2D array
+        new_shape (tuple): Desired output shape
+    
+    Returns:
+        np.ndarray: Downsampled array
+    """
+    # Calculate exact block sizes
+    orig_rows, orig_cols = arr.shape
+    new_rows, new_cols = new_shape
+    
+    # Calculate block dimensions
+    row_factor = orig_rows // new_rows
+    col_factor = orig_cols // new_cols
+    
+    # Trim array to ensure exact division
+    trimmed_arr = arr[:new_rows*row_factor, :new_cols*col_factor]
+    
+    # Reshape and compute mean
+    downsampled = trimmed_arr.reshape(
+        new_rows, row_factor, 
+        new_cols, col_factor
+    ).max(axis=(1, 3))
+    
+    return downsampled
+
+def make_2dimensions_even(array_list):
+    """
+    Takes a list of NumPy arrays and ensures that all arrays have even dimensions.
+    If either dimension is odd, the array is padded at the end to make it even.
+
+    Parameters:
+        array_list (list of numpy.ndarray): List of arrays to process.
+
+    Returns:
+        list of numpy.ndarray: List of arrays with even dimensions.
+    """
+    # Get the shape of the first array as a reference
+    ref_shp = array_list[0].shape
+
+    # Determine the target shape (even dimensions)
+    target_shape = list(ref_shp)
+    
+    for i in range(len(target_shape)):
+        if target_shape[i] % 2 != 0:  # If dimension is odd
+            target_shape[i] += 1  # Make it even by adding 1
+
+    # Calculate the padding required for each dimension
+    padding = (0,target_shape[0] - ref_shp[0], 
+               0, target_shape[1] - ref_shp[1] ) 
+        
+    # Pad the arrays if necessary
+    padded_arrays = []
+    for array in array_list:
+        
+        # Apply padding
+        padded_array = gf.pad_2d(array, *padding)
+        padded_arrays.append(padded_array)
+
+    return padded_arrays
+
+
+def filter_images(images, coords, variance_threshold, kin_coords=None, **kwargs):
+    """
+    Filters images based on variance, with an optional entropy threshold. 
+    Can also filter additional coordinates (kinematic coordinates) if provided.
+
+    Parameters:
+    -----------
+    images : List of 2D images to filter.
+    coords : List of coordinates associated with the images.
+    variance_threshold : Minimum variance required to keep an image.
+    kin_coords : Additional coordinates to filter along with `coords`.
+    entropy_threshold : Minimum Shannon entropy required to keep an image.
+
+    Returns:
+    --------
+    filtered_images : The filtered images.
+    filtered_coords : The filtered coordinates.
+    filtered_kin_coords : The filtered kinematic coordinates (if `kin_coords` is provided).
+    entropies : The entropy values for the filtered images (only if `entropy_threshold` is provided).
+    """
+    entropy_threshold = kwargs.get('entropy_threshold', None)  # Check for entropy threshold
+    filtered_images = []
+    filtered_coords = []
+    filtered_kin_coords = [] if kin_coords is not None else None
+    entropies = [] if entropy_threshold is not None else None
+
+    for i, (img, coord) in enumerate(zip(images, coords)):
+        variance = np.var(img)
+        keep = variance >= variance_threshold  # Initial condition based on variance
+
+        # If entropy threshold is provided, calculate entropy and check the condition
+        if entropy_threshold is not None:
+            entropy = shannon_entropy(img)
+            if keep and entropy >= entropy_threshold:
+                keep = True
+                if entropies is not None:
+                    entropies.append(entropy)
+            else:
+                keep = False
+
+        # Add image and coordinates to the filtered lists if conditions are met
+        if keep:
+            filtered_images.append(img)
+            filtered_coords.append(coord)
+            if kin_coords is not None:
+                filtered_kin_coords.append(kin_coords[i])
+
+    # Return results
+    if kin_coords is not None:
+        if entropies is not None:
+            return filtered_images, filtered_coords, filtered_kin_coords, entropies
+        return filtered_images, filtered_coords, filtered_kin_coords
+    else:
+        if entropies is not None:
+            return filtered_images, filtered_coords, entropies
+        return filtered_images, filtered_coords
+    
+
+
+
+def upsample_image(im, zoom_factor):
+    """
+    Upsample a single image using zoom.
+    """
+    return zoom(im, zoom_factor, order=3).astype(complex)
+
+def upsample_images(images, zoom_factor, n_jobs=-1):
+    """
+    Upsample a list of images in parallel.
+
+    Parameters:
+        images (list of numpy.ndarray): List of input images.
+        zoom_factor (float or tuple): Zoom factor for upsampling.
+        n_jobs (int): Number of CPU cores to use. Default is -1 (use all available cores).
+
+    Returns:
+        numpy.ndarray: Array of upsampled images.
+    """
+    # Use joblib to parallelize the upsampling
+    up_images = Parallel(n_jobs=n_jobs)(delayed(upsample_image)(im, zoom_factor) for im in images)
+
+    return np.array(up_images)

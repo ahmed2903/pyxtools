@@ -137,7 +137,7 @@ def generate_recip_lattice_points(recpspaceVecs: np.ndarray, max_hkl: int) -> np
     return H_hkl
 
 
-    
+
 def generate_realspace_lattice_points(N_ucs: int, realspaceVecs: np.ndarray) -> np.ndarray:
     """
     Generates a set of real space lattice points from the real space vectors
