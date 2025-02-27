@@ -230,7 +230,10 @@ def plot_map_on_detector(detec_image, k_map, vmin, vmax, title, cmap, **kwargs):
     plt.show()
 
 
-def plot_images_side_by_side(image1, image2, title1="Image 1", title2="Image 2", cmap1="gray", cmap2="gray", figsize=(10, 5), show = False):
+def plot_images_side_by_side(image1, image2, 
+                             vmin1= None, vmax1=None, 
+                             vmin2= None, vmax2=None, 
+                             title1="Image 1", title2="Image 2", cmap1="gray", cmap2="gray", figsize=(10, 5), show = False):
     """
     Plots two images side by side.
 
@@ -246,14 +249,29 @@ def plot_images_side_by_side(image1, image2, title1="Image 1", title2="Image 2",
     # Create a figure and subplots
     fig, axes = plt.subplots(1, 2, figsize=figsize)
     
+    
+    if vmin1 is None:
+        me = np.mean(image1) 
+        vmin1 = me - 0.5 *me
+    if vmax1 is None:
+        me = np.mean(image1) 
+        vmax1 = me + 0.5 *me
+    
+    if vmin2 is None:
+        me = np.mean(image2) 
+        vmin2 = me - 0.5 *me
+    if vmax2 is None:
+        me = np.mean(image2) 
+        vmax2 = me + 0.5 *me
+    
     # Plot the first image
-    im1 = axes[0].imshow(image1, cmap=cmap1)    
+    im1 = axes[0].imshow(image1, vmin = vmin1, vmax = vmax1, cmap=cmap1)    
     axes[0].set_title(title1)
     #axes[0].axis('off')  # Hide axes
     plt.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04)
     
     # Plot the second image
-    im2 = axes[1].imshow(image2, cmap=cmap2)
+    im2 = axes[1].imshow(image2, vmin = vmin2, vmax = vmax2, cmap=cmap2)
     axes[1].set_title(title2)
     #axes[1].axis('off')  # Hide axes
     plt.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
@@ -262,3 +280,4 @@ def plot_images_side_by_side(image1, image2, title1="Image 1", title2="Image 2",
     plt.tight_layout()
     if show:
         plt.show()
+        
