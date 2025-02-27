@@ -10,6 +10,8 @@ from skimage.measure import shannon_entropy
 from numpy.fft import fftshift, ifftshift, fft2, ifft2
 from scipy.ndimage import zoom 
 from joblib import Parallel, delayed
+import torch 
+import torch.functional as F
 
 from . import xrays_fs as xf
 from . import general_fs as gf
@@ -25,6 +27,19 @@ def load_hdf_roi(data_folder, f_name, roi):
     with h5py.File(file_path,'r') as f:
         
         data = f['/entry/data/data'][:,roi[0]:roi[1], roi[2]:roi[3]]
+        
+    return data
+
+def load_hdf(data_folder, f_name):
+    """
+    loads the data from a h5 file into a numpy array for a region of interest
+    """
+    
+    file_path = data_folder + "/" + f_name
+    
+    with h5py.File(file_path,'r') as f:
+        
+        data = f['/entry/data/data']
         
     return data
 
