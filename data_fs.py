@@ -12,7 +12,7 @@ from scipy.ndimage import zoom
 from joblib import Parallel, delayed
 
 from . import xrays_fs as xf
-import general_fs as gf
+from . import general_fs as gf
 
 
 def load_hdf_roi(data_folder, f_name, roi):

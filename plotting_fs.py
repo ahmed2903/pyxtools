@@ -50,7 +50,7 @@ def create_gif_from_arrays(array_list, gif_name, fps=10, cmap="viridis"):
         import os
         os.remove(file)
 
-def plot_roi_from_numpy(array, roi, name, vmin, vmax, save = False, **kwargs):
+def plot_roi_from_numpy(array, roi, name, vmin=None, vmax=None, save = False, **kwargs):
 
     """
     Plots a region of interest from a 2D numpy array
@@ -74,6 +74,13 @@ def plot_roi_from_numpy(array, roi, name, vmin, vmax, save = False, **kwargs):
     else:
         raise ValueError("Either pass in a 2D array or a 3D array with 'frame' in the kwargs.")
 
+    if vmin is None:
+        me = np.mean(data_roi) 
+        vmin = me - 0.5 *me
+    if vmax is None:
+        me = np.mean(data_roi) 
+        vmax = me + 0.5 *me
+        
     plt.figure()
     plt.imshow(data_roi, vmin = vmin, vmax = vmax,cmap='viridis')
     plt.title(name)
