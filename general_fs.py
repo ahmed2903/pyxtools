@@ -284,6 +284,7 @@ def pad_2d(array, psx, psy, pex, pey):
     array = np.concatenate((array, np.zeros((pex,shp[1]), dtype = dtype, order = 'C')), axis = 0)
 
     shp = array.shape
+    print(shp)
 
     array = np.concatenate((np.zeros((shp[0],psy), dtype = dtype, order = 'C'), array), axis = 1)
     array = np.concatenate((array, np.zeros((shp[0],pey), dtype = dtype, order = 'C')), axis = 1)

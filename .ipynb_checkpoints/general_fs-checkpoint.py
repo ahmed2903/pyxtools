@@ -4,6 +4,7 @@ from scipy.interpolate import RegularGridInterpolator
 from scipy.optimize import curve_fit
 import time
 from scipy.ndimage import convolve
+import h5py 
 
 def ComputeAngles(a,b,c,hkl1,hkl2):
     
@@ -283,6 +284,7 @@ def pad_2d(array, psx, psy, pex, pey):
     array = np.concatenate((array, np.zeros((pex,shp[1]), dtype = dtype, order = 'C')), axis = 0)
 
     shp = array.shape
+    print(shp)
 
     array = np.concatenate((np.zeros((shp[0],psy), dtype = dtype, order = 'C'), array), axis = 1)
     array = np.concatenate((array, np.zeros((shp[0],pey), dtype = dtype, order = 'C')), axis = 1)
@@ -527,36 +529,28 @@ def filter_elastic_scatt(kouts, kins, tolerance, wavelength):
         kouts (_type_): _description_
         kins (_type_): _description_
     """
-    time1 = time.time()
     # Compute the magnitudes of kin and kout
     # kin_magnitudes = np.linalg.norm(kins, axis=1)  
     # kout_magnitudes = np.linalg.norm(kouts, axis=1)  
     
     # Parallelize norm computation
-    kout_magnitudes = np.concatenate(Parallel(n_jobs=-1)(delayed(compute_norms_chunk)(chunk) for chunk in np.array_split(kouts, 4)))
+    kout_magnitudes = np.concatenate(Parallel(n_jobs=-16)(delayed(compute_norms_chunk)(chunk) for chunk in np.array_split(kouts, 8)))
 
-    time2 = time.time()
-    
-    print(f"calculating magnitudes took {time2-time1:.6f} seconds ")
-    # Create a mask for filtering based on the magnitude condition
-    
+        
     magnitude = 2*math.pi / wavelength
-    
     
     magnitude_diff = np.abs(magnitude - kout_magnitudes)
     mask = magnitude_diff < tolerance
-    
-    print("mask shape is ")
-    print(mask.shape)
-    
-    time5 = time.time()
+        
     # Apply the mask to get the filtered kin and kout pairs
-    filtered_kin = kins[mask]
+    if kins.shape[0] > 1:
+        filtered_kin = kins[mask]
+    else: 
+        filtered_kin = kins
+        
     filtered_kout = kouts[mask]
-    time6 = time.time()
-    print(f"filtering took {time6 - time5 :.6f} seconds")
     
-    return filtered_kout, filtered_kin
+    return filtered_kout, filtered_kin, mask
     
 def calc_detector_max_angle(detector_size, detector_distance):
     
@@ -609,3 +603,26 @@ def convolve_reciprocal_lattice_with_grid(shape_transform, reciprocal_vectors, k
     combined_intensities = (reciprocal_intensities[:, None] * shape_values[None, :]).ravel()  # (M,)
 
     return output_points, combined_intensities
+
+
+def save_to_hdf5(file_path, scan_index, full_image, metadata):
+    """
+    Saves detector images and metadata efficiently in an HDF5 file.
+    
+    Args:
+        file_path (str): Path to the HDF5 file.
+        scan_index (int): Index of the current scan position.
+        full_image (ndarray): 2D detector image to be stored.
+        metadata (dict): Dictionary of metadata parameters.
+    """
+
+    with h5py.File(file_path, "a") as h5f:
+        # Create a group for this scan position
+        group = h5f.create_group(f"scan_{scan_index}")
+        
+        # Store the detector image
+        group.create_dataset("detector_image", data=full_image, compression="gzip", compression_opts=4)
+
+        # Save metadata as attributes
+        for key, value in metadata.items():
+            group.attrs[key] = str(value)  # Convert all metadata values to strings

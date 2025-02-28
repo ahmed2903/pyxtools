@@ -10,6 +10,8 @@ from skimage.measure import shannon_entropy
 from numpy.fft import fftshift, ifftshift, fft2, ifft2
 from scipy.ndimage import zoom 
 from joblib import Parallel, delayed
+import torch 
+import torch.functional as F
 
 from . import xrays_fs as xf
 from . import general_fs as gf
@@ -28,6 +30,19 @@ def load_hdf_roi(data_folder, f_name, roi):
         
     return data
 
+def load_hdf(data_folder, f_name):
+    """
+    loads the data from a h5 file into a numpy array for a region of interest
+    """
+    
+    file_path = data_folder + "/" + f_name
+    
+    with h5py.File(file_path,'r') as f:
+        
+        data = f['/entry/data/data']
+        
+    return data
+
 def list_datafiles(data_folder):
     """
     lists all h5 data files in a folder 
@@ -42,7 +57,7 @@ def list_datafiles(data_folder):
 
 
 
-def average_data(data_folder, names_array, roi, conc=False):
+def average_data(data_folder, names_array, roi, slow_axis = 0, conc=False):
     
     """
     averages all the data in a NxM scan
@@ -70,6 +85,10 @@ def average_data(data_folder, names_array, roi, conc=False):
     stacked_data = np.concatenate(all_data,axis=0)
     average_data = np.mean(stacked_data, axis=0)
 
+
+    if slow_axis == 0:
+        average_data = np.transpose(average_data)
+        
     t2=time.perf_counter()
 
     print(f"finsihed in {t2-t1}")
@@ -106,7 +125,7 @@ def stack_data(data_folder, names_array, roi, conc = True):
     return stacked_data
     
 
-def stack_4d_data(data_folder,names_array,roi, conc = False):
+def stack_4d_data(data_folder,names_array,roi, slow_axis = 0, conc = False):
 
     
     nx = roi[1] - roi[0] # roi vertical size
@@ -121,7 +140,7 @@ def stack_4d_data(data_folder,names_array,roi, conc = False):
     else:
         all_data = []
         for i in range(len(names_array)):
-            all_data.append(  load_hdf_roi(data_folder, names_array[i], roi)  )
+            all_data.append(load_hdf_roi(data_folder, names_array[i], roi)  )
         all_data = np.array(all_data)
     t2=time.perf_counter()
 
@@ -129,10 +148,14 @@ def stack_4d_data(data_folder,names_array,roi, conc = False):
     
         
     stacked_data = np.stack(all_data, axis=0)
+
+    if slow_axis == 0: 
+
+        stacked_data = np.transpose(stacked_data, (1,0,2,3))
     
     return stacked_data
 
-def make_coherent_image(data: np.ndarray, pixel_idx:np.ndarray):
+def make_coherent_image(data: np.ndarray, pixel_idx:np.ndarray, slow_axis = 0):
     
     """
     Makes a single coherent image from a 4D data set that is size (M,N,x,y) using one pixel 
@@ -352,11 +375,11 @@ def make_2dimensions_even(array_list):
     for i in range(len(target_shape)):
         if target_shape[i] % 2 != 0:  # If dimension is odd
             target_shape[i] += 1  # Make it even by adding 1
+            print(f"padding {i}")
 
     # Calculate the padding required for each dimension
-    padding = (0,target_shape[0] - ref_shp[0], 
-               0, target_shape[1] - ref_shp[1] ) 
-        
+    padding = (0, 0, target_shape[0] - ref_shp[0], target_shape[1] - ref_shp[1] ) 
+    print(padding)
     # Pad the arrays if necessary
     padded_arrays = []
     for array in array_list:

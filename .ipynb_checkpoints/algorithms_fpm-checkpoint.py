@@ -71,7 +71,7 @@ def epry(images, pupil_func, kout_vec,
     ky_min_n, ky_max_n = bounds_y
     dkx, dky = dks
 
-    if hr_obj_image or hr_fourier_image is None:
+    if hr_obj_image is None or hr_fourier_image is None:
         hr_obj_image, hr_fourier_image = init_hr_image(bounds_x, bounds_y, dks)
     
     omega_obj_x, omega_obj_y = omegas
@@ -133,14 +133,14 @@ def epry_lr(images, pupil_func, kout_vec,
 
     omega_obj_x, omega_obj_y = omegas
     
-    if hr_obj_image or hr_fourier_image is None: 
-        hr_obj_image = np.zeros_like(images[0]).astype(complex)
-        hr_fourier_image = np.zeros_like(images[0]).astype(complex)
+    if hr_obj_image is None or hr_fourier_image is None: 
+        hr_obj_image = np.ones_like(images[0]).astype(complex)
+        hr_fourier_image = np.ones_like(images[0]).astype(complex)
     
     # Shapes
     nx_lr , ny_lr = images[0].shape
     nx_hr , ny_hr = hr_obj_image.shape
-    
+    print(images.shape)
     for it in range(num_iter):
         print(f"Iteration Number: {it+1}/{num_iter}")
         
@@ -168,6 +168,7 @@ def epry_lr(images, pupil_func, kout_vec,
             # Update fourier spectrum
             mod_pupil = np.abs(pupil_func_patch)**2  
             weight_fac_pupil = np.conjugate(pupil_func_patch) / (mod_pupil.max() + 1e-23)
+            print(mod_pupil.max())
             weight_fac_pupil *= alpha
             
             delta_lowres_ft = image_FT_update - image_FT 
@@ -176,6 +177,7 @@ def epry_lr(images, pupil_func, kout_vec,
             # Update Pupil Function 
             mod_obj = np.abs(hr_fourier_image)**2
             weight_factor_obj = np.conjugate(hr_fourier_image) / (mod_obj.max() + 1e-23)
+            print(mod_obj.max())
             weight_factor_obj *= beta 
             
             pupil_func[kx_lidx:kx_hidx, ky_lidx:ky_hidx] += weight_factor_obj * delta_lowres_ft
