@@ -29,7 +29,7 @@ class load_data:
         self.wavelength = wavelength 
         self.slow_axis = slow_axis
         
-        self.dir = directory
+        self.dir = '/'.join(directory, f'Scan_{scan_num}')
         self.scan_num = scan_num
         self.rois_dict = {}
         self.ptychographs = {}
