@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from matplotlib.widgets import Button, TextBox
 from matplotlib.patches import Rectangle
 
-from ..data_fs import list_datafiles, stack_4d_data, make_coherent_image, make_detector_image, average_data, mask_hot_pixels, make_coordinates, filter_images
+from ..data_fs import list_datafiles, stack_4d_data, make_coherent_image, make_detector_image, average_data, mask_hot_pixels, make_coordinates, filter_images, load_hdf_roi
 from ..xrays_fs import compute_vectors
 from  ..plotting_fs import plot_roi_from_numpy
 
@@ -29,7 +29,7 @@ class load_data:
         self.wavelength = wavelength 
         self.slow_axis = slow_axis
         
-        self.dir = '/'.join(directory, f'Scan_{scan_num}')
+        self.dir = f"{directory.rstrip('/')}/Scan_{scan_num}/" 
         self.scan_num = scan_num
         self.rois_dict = {}
         self.ptychographs = {}
@@ -38,11 +38,9 @@ class load_data:
         self.coords = {}
         self.kouts = {}
         self.cohernt_imgs = {}
-      
-      
-    def get_file_names(self):
+
+        self.fnames = list_datafiles(self.dir)[:-2]        
         
-        self.fnames = list_datafiles(self.dir)[:-2]
     
     def load_files(self):
         
@@ -56,40 +54,55 @@ class load_data:
         self.ptychographs[roi_name] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name], conc=True)
         
 
-    def plot_full_detector(self, file_no, frame_no ):
+    def plot_full_detector(self, file_no, frame_no, 
+                          
+                          vmin1=None, vmax1=None, 
+                          vmin2=None, vmax2=None):
         """
         Plots one full frame of the detector
         """
-        frame_no = (6-len(str(frame_no)))*'0' + str(frame_no)
+        file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
         
-        file_name = self.dir+f'Scan_{self.scan_num}_data_{file_no}.h5'
+        file_name = self.dir+f'Scan_{self.scan_num}_data_{file_no_st}.h5'
 
         with h5py.File(file_name,'r') as f:
             data_test = f['/entry/data/data'][frame_no,:,:]
         
-        fig, axes = plt.subplots(1, 2, figsize=(8,5))
+        fig, axes = plt.subplots(1, 2, figsize=(10,5))
 
         log_data = np.log1p(data_test)
 
-        axes[0].imshow(data_test, cmap='jet',  vmin = 0, vmax = 3)
-        axes[0].set_title('Full Detector in One Frame')
+        axes[0].imshow(data_test, cmap='jet',  vmin = vmin1, vmax = vmax1)
+        axes[0].set_title(f'Full Detector in Frame ({file_no},{frame_no})')
         axes[0].axis('on')  
 
-        axes[1].imshow(log_data, cmap='jet',  vmin=0, vmax=0.5)
-        axes[1].set_title('Log Scale in One Frame')
+        axes[1].imshow(log_data, cmap='jet',  vmin=vmin2, vmax=vmax2)
+        axes[1].set_title(f'Log Scale in Frame ({file_no},{frame_no})')
         axes[1].axis('on')
 
         plt.tight_layout()
         
         
-    def plot_detector_roi(self, roi_name:str, title:str, vmin, vmax, save=False):
+    def plot_detector_roi(self, roi_name, file_no, frame_no, title=None, vmin=None, vmax=None,mask_hot = False, save=False):
         """
-        Plots a detector roi
+        Plots a detector roi in one frame
         """
         
-        #plot_roi_from_numpy(averaged_data, all_detector, title, vmin=vmin, vmax=vmax, save = save)
+        file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
         
-        pass
+        file_name = self.dir+f'Scan_{self.scan_num}_data_{file_no_st}.h5'
+
+        xs,xe,ys,ye = self.rois_dict[roi_name]
+        with h5py.File(file_name,'r') as f:
+            data_test = f['/entry/data/data'][frame_no,xs:xe,ys:ye]
+
+        if mask_hot:
+
+            data_test = mask_hot_pixels(data_test)
+        if title is None:
+            title = f"Detector image at {roi_name} in Frame ({file_no}, {frame_no})"
+        plot_roi_from_numpy(data_test, [0,-1,0,-1], title, vmin=vmin, vmax=vmax, save = save)
+        
     
     def add_roi(self, roi_name:str , roi:list):
         """
@@ -253,7 +266,11 @@ class load_data:
         
         if hot_pixels:
             self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name])
-    
+            
+    def plot_average_roi(self, roi_name, vmin=None, vmax=None, title=None):
+            
+            plot_roi_from_numpy(self.average_data[roi_name], [0,-1,0,-1], vmin=vmin, vmax=vmax, title = f"Averaged Frames for {roi_name}")
+            
     def make_coherent_images(self, roi_name):
         
         """
