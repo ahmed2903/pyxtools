@@ -57,7 +57,7 @@ def list_datafiles(data_folder):
 
 
 
-def average_data(data_folder, names_array, roi, slow_axis = 0, conc=False):
+def average_data(data_folder, names_array, roi, conc=False):
     
     """
     averages all the data in a NxM scan
@@ -84,10 +84,6 @@ def average_data(data_folder, names_array, roi, slow_axis = 0, conc=False):
             
     stacked_data = np.concatenate(all_data,axis=0)
     average_data = np.mean(stacked_data, axis=0)
-
-
-    if slow_axis == 0:
-        average_data = np.transpose(average_data)
         
     t2=time.perf_counter()
 
