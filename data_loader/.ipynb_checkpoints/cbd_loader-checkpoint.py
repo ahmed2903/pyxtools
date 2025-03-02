@@ -19,12 +19,12 @@ from  ..plotting_fs import plot_roi_from_numpy
 
 class load_data:
     
-    def __init__(self, directory , scan_num, 
+    def __init__(self, directory:str, scan_num: int, 
                  
-                 det_psize, det_distance, centre_pixel, wavelength, slow_axis):
+                 det_psize:float, det_distance:float, centre_pixel:tuple[int], wavelength:float, slow_axis:int):
         
         self.det_psize = det_psize
-        self.det_psize = det_distance
+        self.det_distance = det_distance
         self.centre_pixel = centre_pixel
         self.wavelength = wavelength 
         self.slow_axis = slow_axis
@@ -33,7 +33,7 @@ class load_data:
         self.scan_num = scan_num
         self.rois_dict = {}
         self.ptychographs = {}
-        self.average_data = {}
+        self.averaged_data = {}
         
         self.coords = {}
         self.kouts = {}
@@ -259,7 +259,7 @@ class load_data:
         
     def average_frames_roi(self, roi_name):
         
-        self.averaged_rois[roi_name] = average_data(self.dir, self.fnames, self.rois_dict[roi_name], conc=True)
+        self.averaged_data[roi_name] = average_data(self.dir, self.fnames, self.rois_dict[roi_name], conc=True)
         self.averaged_data[roi_name] =  mask_hot_pixels(self.averaged_data[roi_name])
     
     def mask_roi(self, roi_name, hot_pixels = True, mask_val=1):
@@ -269,7 +269,7 @@ class load_data:
             
     def plot_average_roi(self, roi_name, vmin=None, vmax=None, title=None):
             
-            plot_roi_from_numpy(self.average_data[roi_name], [0,-1,0,-1], vmin=vmin, vmax=vmax, title = f"Averaged Frames for {roi_name}")
+            plot_roi_from_numpy(self.averaged_data[roi_name], [0,-1,0,-1], vmin=vmin, vmax=vmax, title = f"Averaged Frames for {roi_name}")
             
     def make_coherent_images(self, roi_name):
         
@@ -304,17 +304,23 @@ class load_data:
         self.coords[roi_name+"_clean"] = cleaned_coords
         
         
-    def make_kvector(self, roi_name):
+    def make_kvector(self, roi_name, mask_val):
         
-        self.coords[roi_name] = make_coordinates(self.average_data, self.mask_val, self.rois_dict[roi_name], crop=False)
-        self.kouts[roi_name] = compute_vectors(self.coords[roi_name], self.crys_distance, self.det_psize, self.centre_pixel, self.wavelength)
+        self.coords[roi_name] = make_coordinates(self.averaged_data[roi_name], mask_val, self.rois_dict[roi_name], crop=False)
+        
+        self.kouts[roi_name] = compute_vectors(self.coords[roi_name], self.det_distance, self.det_psize, self.centre_pixel, self.wavelength)
     
     
-    def prepare_roi(self, roi_name, variance_threshold):
-        
+    def prepare_roi(self, roi_name:str, mask_val: float, variance_threshold:float):
+        """
+        full preparating of the roi, after running add_roi.
+        roi_name (string): name of the roi. 
+        mask_val (float): masks values on detector to include in the coords array.
+        variance_threshold (float): value of the threshold for filtering the coherent images. 
+        """
         self.make_4d_dataset(roi_name=roi_name)
         self.average_frames_roi(roi_name=roi_name)
-        self.make_kvector(roi_name=roi_name)
+        self.make_kvector(roi_name=roi_name,mask_val= mask_val)
         self.make_coherent_images(roi_name=roi_name)
         self.filter_coherent_images(roi_name=roi_name, variance_threshold=variance_threshold)
         
