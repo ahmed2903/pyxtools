@@ -53,7 +53,7 @@ class load_data:
         """
         self.ptychographs[roi_name] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name], conc=True)
         
-
+        self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name])
     def plot_full_detector(self, file_no, frame_no, 
                           
                           vmin1=None, vmax1=None, 
@@ -269,7 +269,7 @@ class load_data:
             
     def plot_average_roi(self, roi_name, vmin=None, vmax=None, title=None):
             
-            plot_roi_from_numpy(self.averaged_data[roi_name], [0,-1,0,-1], vmin=vmin, vmax=vmax, title = f"Averaged Frames for {roi_name}")
+            plot_roi_from_numpy(self.averaged_data[roi_name], [0,-1,0,-1], f"Averaged Frames for {roi_name}", vmin=vmin, vmax=vmax )
             
     def make_coherent_images(self, roi_name):
         
