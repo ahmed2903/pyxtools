@@ -110,153 +110,8 @@ class load_data:
         """
         self.rois_dict[roi_name] = roi 
      
-    def plot_4d_dataset(self, roi_name:str):
         
-        px = 20 #pxs[0] 
-        py = 20 #pys[0]
-
-        lx=20
-        ly=27
-
-        rectangle_size = 3
-
-        coherent_image = make_coherent_image(self.ptychographs[roi_name], np.array([px,py]))
-        detector_image = make_detector_image(self.ptychographs[roi_name], np.array([lx,ly]))
-
-        vmin_c = np.mean(coherent_image) - 0.05*np.mean(coherent_image)
-        vmax_c = np.mean(coherent_image) + 0.05*np.mean(coherent_image)
-
-        vmin_d = np.mean(detector_image) - 0.3*np.mean(detector_image)
-        vmax_d = np.mean(detector_image) + 2*np.mean(detector_image)
-
-        # Function to update the plot
-        def update_plot():
-            
-            coherent_image = make_coherent_image(self.ptychographs[roi_name], np.array([px, py]))
-            detector_image = make_detector_image(self.ptychographs[roi_name], np.array([lx, ly]))
-            
-            im0.set_data(coherent_image)
-            axes[0].set_title(f"Coherent Image from Pixel ({px}, {py})")
-            
-            vmin_c = np.mean(coherent_image) - 0.1*np.mean(coherent_image)
-            vmax_c = np.mean(coherent_image) + 2*np.mean(coherent_image)
-            
-            im0.set_clim(vmin_c, vmax_c)
-
-            im1.set_data(detector_image)
-            axes[1].set_title(f'Detector Image at Location ({lx},{ly})')
-            
-            vmin_d = np.mean(detector_image) - 0.5*np.mean(detector_image)
-            vmax_d = np.mean(detector_image) + 2*np.mean(detector_image)
-            
-            im1.set_clim(vmin_d, vmax_d)
-            
-            # Update rectangles
-            rect_coherent.set_xy((lx - rectangle_size, ly - rectangle_size))  # Positioning based on pixel center
-            rect_detector.set_xy((px - rectangle_size, py - rectangle_size))
-
-
-            fig.canvas.draw_idle()
-            
-        # Callback functions for buttons
-        def increment_px(event):
-            global px
-            px = (px + 1) % self.ptychographs[roi_name].shape[2]
-            update_plot()
-
-        def decrement_px(event):
-            global px
-            px = (px - 1) % self.ptychographs[roi_name].shape[2]
-            update_plot()
-
-        def increment_py(event):
-            global py
-            py = (py + 1) % self.ptychographs[roi_name].shape[3]
-            update_plot()
-
-        def decrement_py(event):
-            global py
-            py = (py - 1) % self.ptychographs[roi_name].shape[3]
-            update_plot()
-
-        def increment_lx(event):
-            global lx
-            lx = (lx + 1) % self.ptychographs[roi_name].shape[1]
-            update_plot()
-
-        def decrement_lx(event):
-            global lx
-            lx = (lx - 1) % self.ptychographs[roi_name].shape[1]
-            update_plot()
-
-        def increment_ly(event):
-            global ly
-            ly = (ly + 1) % self.ptychographs[roi_name].shape[0]
-            update_plot()
-
-        def decrement_ly(event):
-            global ly
-            ly = (ly - 1) % self.ptychographs[roi_name].shape[0]
-            update_plot()
-        
-        fig, axes = plt.subplots(1, 2, figsize=(10,5))
-        im0 = axes[0].imshow(coherent_image, cmap='plasma', vmin = vmin_c, vmax = vmax_c)
-        axes[0].set_title(f"Coherent Image from Pixel ({px}, {py})")
-        axes[0].set_xlabel("N")
-        axes[0].set_ylabel("M")
-        plt.colorbar(im0, ax=axes[0], label="Intensity Coherent Images")
-
-
-        im1 = axes[1].imshow(detector_image, cmap='plasma',  vmin=vmin_d, vmax=vmax_d)
-        axes[1].set_title(f'Detector Image at location ({lx},{ly})')
-        axes[1].set_xlabel("x")
-        axes[1].set_ylabel("y")
-        plt.colorbar(im1, ax=axes[1], label = "Detector Intensity")
-
-        # Add white rectangles
-        rect_coherent = Rectangle((lx - rectangle_size, ly - rectangle_size), 1, 1, edgecolor='white', facecolor='white', lw=2)
-        rect_detector = Rectangle((px - rectangle_size, py - rectangle_size), 1, 1, edgecolor='white', facecolor='white', lw=2)
-        axes[0].add_patch(rect_coherent)
-        axes[1].add_patch(rect_detector)
-
-
-        # Add buttons for each parameter
-        button_ax_px_inc = plt.axes([0.2, 0.05, 0.1, 0.04])  # [left, bottom, width, height]
-        button_ax_px_dec = plt.axes([0.1, 0.05, 0.1, 0.04])
-
-        button_ax_py_inc = plt.axes([0.2, 0.01, 0.1, 0.04])
-        button_ax_py_dec = plt.axes([0.1, 0.01, 0.1, 0.04])
-
-        button_ax_lx_inc = plt.axes([0.7, 0.05, 0.1, 0.04])
-        button_ax_lx_dec = plt.axes([0.6, 0.05, 0.1, 0.04])
-
-        button_ax_ly_inc = plt.axes([0.7, 0.01, 0.1, 0.04])
-        button_ax_ly_dec = plt.axes([0.6, 0.01, 0.1, 0.04])
-
-        btn_px_inc = Button(button_ax_px_inc, 'px +')
-        btn_px_dec = Button(button_ax_px_dec, 'px -')
-        btn_py_inc = Button(button_ax_py_inc, 'py +')
-        btn_py_dec = Button(button_ax_py_dec, 'py -')
-        btn_lx_inc = Button(button_ax_lx_inc, 'lx +')
-        btn_lx_dec = Button(button_ax_lx_dec, 'lx -')
-        btn_ly_inc = Button(button_ax_ly_inc, 'ly +')
-        btn_ly_dec = Button(button_ax_ly_dec, 'ly -')
-
-        # Connect buttons to their callbacks
-        btn_px_inc.on_clicked(increment_px)
-        btn_px_dec.on_clicked(decrement_px)
-        btn_py_inc.on_clicked(increment_py)
-        btn_py_dec.on_clicked(decrement_py)
-        btn_lx_inc.on_clicked(increment_lx)
-        btn_lx_dec.on_clicked(decrement_lx)
-        btn_ly_inc.on_clicked(increment_ly)
-        btn_ly_dec.on_clicked(decrement_ly)
-
-        plt.tight_layout()
-        plt.ion()
-        plt.show()
-        
-    def plot_4d_dataset2(self, roi_name: str):
+    def plot_4d_dataset(self, roi_name: str):
         # Get dataset dimensions
         coherent_shape = self.ptychographs[roi_name].shape[:2]  
         detector_shape = self.ptychographs[roi_name].shape[2:]  
@@ -331,7 +186,45 @@ class load_data:
         interactive_plot = widgets.interactive(update_plot, px=px_slider, py=py_slider, lx=lx_slider, ly=ly_slider)
         
         display(interactive_plot)  # Display the interactive widget
+        
+    def plot_coherent_sequence(self, roi_name: str):
+        """Displays a list of coherent images and allows scrolling through them via a slider."""
+        
+        img_list = self.coherent_imgs[roi_name]  # List of coherent images
 
+        num_images = len(img_list)  # Number of images in the list
+        
+        # Create a slider for selecting the image index
+        img_slider = widgets.IntSlider(min=0, max=num_images - 1, value=0, description="Image")
+
+        # Create figure & axis once
+        fig, ax = plt.subplots(figsize=(6, 6))
+        
+        # Initial image
+        vmin, vmax = np.min(img_list[0]), np.max(img_list[0])  # Normalize color scale
+        im = ax.imshow(img_list[0], cmap='plasma', vmin=vmin, vmax=vmax)
+        ax.set_title(f"Coherent Image {0}/{num_images - 1}")
+        plt.colorbar(im, ax=ax, label="Intensity")
+
+        def update_image(img_idx):
+            """Updates the displayed image when the slider is moved."""
+            img = img_list[img_idx]
+            img_mean = np.mean(img)
+            vmin = img_mean - 0.05 * img_mean
+            vmax = img_mean + 0.05 * img_mean
+            
+            im.set_data(img)  # Update image data
+            im.set_clim(vmin, vmax)
+            
+            ax.set_title(f"Coherent Image {img_idx}/{num_images - 1}")  # Update title
+            fig.canvas.draw_idle()  # Efficient redraw
+
+        # Create interactive slider
+        interactive_plot = widgets.interactive(update_image, img_idx=img_slider)
+
+        display(interactive_plot)  # Show slider
+        display(fig)  # Display the figure
+        
     def average_frames_roi(self, roi_name):
         
         self.averaged_data[roi_name] = average_data(self.dir, self.fnames, self.rois_dict[roi_name], conc=True)
@@ -369,7 +262,7 @@ class load_data:
         Makes the dimensions of the coherent images even
         """
         
-        self.cohernt_imgs[roi_name] = make_2dimensions_even(self.cohernt_imgs[roi_name])
+        self.coherent_imgs[roi_name] = make_2dimensions_even(self.coherent_imgs[roi_name])
         
     def filter_coherent_images(self, roi_name:str, variance_threshold):
         
@@ -405,4 +298,5 @@ class load_data:
         self.make_coherent_images(roi_name=roi_name)
         self.filter_coherent_images(roi_name=roi_name, variance_threshold=variance_threshold)
         self.even_dims_cohimages(roi_name=roi_name)
+        
     

@@ -376,7 +376,6 @@ def make_2dimensions_even(array_list):
 
     # Calculate the padding required for each dimension
     padding = (0, 0, target_shape[0] - ref_shp[0], target_shape[1] - ref_shp[1] ) 
-    print(padding)
     # Pad the arrays if necessary
     padded_arrays = []
     for array in array_list:
