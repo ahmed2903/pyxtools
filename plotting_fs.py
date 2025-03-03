@@ -229,7 +229,49 @@ def plot_map_on_detector(detec_image, k_map, vmin, vmax, title, cmap, **kwargs):
     
     plt.show()
 
+from matplotlib.animation import FuncAnimation
+from IPython.display import display, clear_output
 
+def initialize_live_plot():
+    """
+    Initializes the live plot with two subplots: one for amplitude and one for phase.
+    
+    Returns:
+        fig, ax: Matplotlib figure and axes.
+        img_amp, img_phase: Image objects for real-time updates.
+    """
+    fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+
+    ax[0].set_title("Amplitude")
+    ax[1].set_title("Phase")
+
+    # Initialize empty images
+    img_amp = ax[0].imshow(np.zeros((100, 100)), cmap='viridis', vmin=0, vmax=1)
+    img_phase = ax[1].imshow(np.zeros((100, 100)), cmap='viridis', vmin=-np.pi, vmax=np.pi)
+
+    plt.ion()  # Enable interactive mode
+    plt.show()
+
+    return fig, ax, img_amp, img_phase
+
+def update_live_plot(img_amp, img_phase, hr_obj_image, fig):
+    """
+    Updates the live plot with new amplitude and phase images.
+
+    Args:
+        img_amp: Matplotlib image object for amplitude.
+        img_phase: Matplotlib image object for phase.
+        hr_obj_image: The complex object image to be plotted.
+    """
+    amplitude = np.abs(hr_obj_image)
+    phase = np.angle(hr_obj_image)
+
+    img_amp.set_data(amplitude / amplitude.max())  # Normalize for visibility
+    img_phase.set_data(phase)
+    clear_output(wait=True)
+    display(fig)
+    fig.canvas.draw()
+    fig.canvas.flush_events()
 def plot_images_side_by_side(image1, image2, 
                              vmin1= None, vmax1=None, 
                              vmin2= None, vmax2=None, 

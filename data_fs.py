@@ -12,7 +12,8 @@ from scipy.ndimage import zoom
 from joblib import Parallel, delayed
 import torch 
 import torch.functional as F
-
+from skimage.registration import phase_cross_correlation
+from scipy.ndimage import fourier_shift
 from . import xrays_fs as xf
 from . import general_fs as gf
 
@@ -445,6 +446,49 @@ def filter_images(images, coords, variance_threshold, kin_coords=None, **kwargs)
         return filtered_images, filtered_coords
     
 
+def align_images(images, upsample_factor=100):
+    """
+    Aligns 2D images, corrects for relative shifts, and returns corrected images along with the phase factors.
+
+    Based on Mansi's code
+    
+    Input:
+    images : list  of 2D images containing the same object.
+    upsample_factor : The upsampling factor for subpixel accuracy (default: 100).
+
+    Returns:
+    corrected_images : The aligned (shift-corrected) images.
+    shifts : The relative shifts (dy, dx) for each image relative to the first image.
+    phase_factors : The phase factors applied in Fourier space for each shift.
+    """
+    # Use the first image as the reference
+    ref_image = images[0]
+    
+    # Prepare outputs
+    corrected_images = []
+    shifts = []
+    phase_factors = []
+    
+    for i, img in enumerate(images):
+        # Compute relative shift between the reference and the current image
+        shift, error, diffphase = phase_cross_correlation(
+            ref_image, img, upsample_factor=upsample_factor
+        )
+        shifts.append(shift)
+        
+        # Apply Fourier-domain shift correction
+        shifted_image_fft = fourier_shift(np.fft.fftn(img), shift)
+        corrected_image = np.fft.ifftn(shifted_image_fft).real
+        corrected_images.append(corrected_image)
+        
+        # Calculate phase factor for the shift
+        ny, nx = img.shape
+        y = np.fft.fftfreq(ny)[:, np.newaxis]
+        x = np.fft.fftfreq(nx)
+        phase_factor = np.exp(-2j * np.pi * (shift[0] * y + shift[1] * x))
+        phase_factors.append(phase_factor)
+    
+    return corrected_images, shifts, phase_factors
 
 
 def upsample_image(im, zoom_factor):
