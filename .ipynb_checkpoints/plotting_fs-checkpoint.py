@@ -232,7 +232,7 @@ def plot_map_on_detector(detec_image, k_map, vmin, vmax, title, cmap, **kwargs):
 from matplotlib.animation import FuncAnimation
 from IPython.display import display, clear_output
 
-def initialize_live_plot():
+def initialize_live_plot(hr_obj_image):
     """
     Initializes the live plot with two subplots: one for amplitude and one for phase.
     
@@ -240,15 +240,20 @@ def initialize_live_plot():
         fig, ax: Matplotlib figure and axes.
         img_amp, img_phase: Image objects for real-time updates.
     """
-    fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-
-    ax[0].set_title("Amplitude")
-    ax[1].set_title("Phase")
 
     # Initialize empty images
-    img_amp = ax[0].imshow(np.zeros((100, 100)), cmap='viridis', vmin=0, vmax=1)
-    img_phase = ax[1].imshow(np.zeros((100, 100)), cmap='viridis', vmin=-np.pi, vmax=np.pi)
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+            
+    # Initialize the plots with the initial image
+    mag_plot = axes[0].imshow(np.abs(hr_obj_image), vmin =.2, vmax = 1, cmap='viridis')
+    axes[0].set_title("Amplitude of Object")
+    plt.colorbar(mag_plot, ax=axes[0])
 
+    phase_plot = axes[1].imshow(np.angle(hr_obj_image), vmin = -np.pi, vmax = np.pi, cmap='viridis')
+    axes[1].set_title("Phase of Object")
+    plt.colorbar(phase_plot, ax=axes[1])
+
+    plt.tight_layout()
     plt.ion()  # Enable interactive mode
     plt.show()
 
@@ -265,13 +270,21 @@ def update_live_plot(img_amp, img_phase, hr_obj_image, fig):
     """
     amplitude = np.abs(hr_obj_image)
     phase = np.angle(hr_obj_image)
-
-    img_amp.set_data(amplitude / amplitude.max())  # Normalize for visibility
+    
+    img_amp.set_data(amplitude)  # Normalize for visibility
     img_phase.set_data(phase)
-    clear_output(wait=True)
+
+    amp_mean = np.mean(amplitude)
+    vmin = amp_mean - 0.1 * amp_mean
+    vmax = amp_mean + 0.1 * amp_mean
+    img_amp.autoscale()  # Reset autoscaling
+    img_amp.set_clim(vmin, vmax)
+    plt.colorbar(mag_plot, ax=axes[0])
+    #clear_output(wait=True)
     display(fig)
-    fig.canvas.draw()
+    #fig.canvas.draw()
     fig.canvas.flush_events()
+    
 def plot_images_side_by_side(image1, image2, 
                              vmin1= None, vmax1=None, 
                              vmin2= None, vmax2=None, 
