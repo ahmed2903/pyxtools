@@ -363,6 +363,13 @@ class load_data:
             coherent_imgs.append(coh_img)
     
         self.coherent_imgs[roi_name] = coherent_imgs
+    
+    def even_dims_cohimages(self, roi_name):
+        """
+        Makes the dimensions of the coherent images even
+        """
+        
+        self.cohernt_imgs[roi_name] = make_2dimensions_even(self.cohernt_imgs[roi_name])
         
     def even_dims_cohimages(self, roi_name):
         """
@@ -405,4 +412,5 @@ class load_data:
         self.make_coherent_images(roi_name=roi_name)
         self.filter_coherent_images(roi_name=roi_name, variance_threshold=variance_threshold)
         self.even_dims_cohimages(roi_name=roi_name)
+        
     
