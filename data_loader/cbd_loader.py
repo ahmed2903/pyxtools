@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from matplotlib.widgets import Button, TextBox
 from matplotlib.patches import Rectangle
 
-from ..data_fs import list_datafiles, stack_4d_data, make_coherent_image, make_detector_image, average_data, mask_hot_pixels, make_coordinates, filter_images, load_hdf_roi
+from ..data_fs import list_datafiles, make_2dimensions_even, stack_4d_data, make_coherent_image, make_detector_image, average_data, mask_hot_pixels, make_coordinates, filter_images, load_hdf_roi
 from ..xrays_fs import compute_vectors
 from  ..plotting_fs import plot_roi_from_numpy
 
@@ -288,6 +288,13 @@ class load_data:
             coherent_imgs.append(coh_img)
     
         self.cohernt_imgs[roi_name] = coherent_imgs
+    
+    def even_dims_cohimages(self, roi_name):
+        """
+        Makes the dimensions of the coherent images even
+        """
+        
+        self.cohernt_imgs[roi_name] = make_2dimensions_even(self.cohernt_imgs[roi_name])
         
         
     def filter_coherent_images(self, roi_name:str, variance_threshold):
@@ -299,9 +306,9 @@ class load_data:
                                                                          variance_threshold = variance_threshold)
     
 
-        self.cohernt_imgs[roi_name+"_clean"] = cleaned_coh_images
-        self.kouts[roi_name+"_clean"] = cleaned_kxky
-        self.coords[roi_name+"_clean"] = cleaned_coords
+        self.cohernt_imgs[roi_name] = cleaned_coh_images
+        self.kouts[roi_name] = cleaned_kxky
+        self.coords[roi_name] = cleaned_coords
         
         
     def make_kvector(self, roi_name, mask_val):
@@ -323,5 +330,6 @@ class load_data:
         self.make_kvector(roi_name=roi_name,mask_val= mask_val)
         self.make_coherent_images(roi_name=roi_name)
         self.filter_coherent_images(roi_name=roi_name, variance_threshold=variance_threshold)
+        self.even_dims_cohimages(roi_name=roi_name)
         
     
