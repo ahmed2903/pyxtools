@@ -11,7 +11,7 @@ from numpy.fft import fftshift, ifftshift, fft2, ifft2
 from scipy.ndimage import zoom 
 from joblib import Parallel, delayed
 import torch 
-import torch.functional as F
+import torch.nn.functional as F
 from skimage.registration import phase_cross_correlation
 from scipy.ndimage import fourier_shift
 from . import xrays_fs as xf
@@ -235,7 +235,7 @@ def make_coordinates(array, mask_val, roi, crop):
 
     return coords
 
-def mask_hot_pixels(array):
+def mask_hot_pixels(array, mask_coh_img=False):
     """
     Masks hot pixels (maximum values in the last two dimensions) in a 4D array.
     
@@ -249,13 +249,18 @@ def mask_hot_pixels(array):
     if len(array.shape)>3:
         # Find the maximum value along the last two dimensions (x, y) for each (N, M)
         max_values = np.max(array, axis=(2, 3), keepdims=True)
+        if mask_coh_img:
+            max_values_coh = np.max(array, axis=(0, 1), keepdims=True)
+            
     if len(array.shape) == 2:
         max_values = np.max(array, axis=(0, 1), keepdims=True)
     else: 
         max_values = np.max(array, axis=(1, 2), keepdims=True)
     # Mask all the values equal to the maximum value in the 2D slice with NaN (or 0)
     masked_array = np.where(array == max_values, 0.0, array)
-    
+    if mask_coh_img:
+        masked_array = np.where(masked_array == max_values_coh, 0.0, masked_array)
+        
     return masked_array
 
 def estimate_pupil_size(array, mask_val, pixel_size, pupil_roi, crop=True):

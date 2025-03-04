@@ -15,7 +15,7 @@ from matplotlib.patches import Rectangle
 import ipywidgets as widgets
 from IPython.display import display
 
-from ..data_fs import list_datafiles, make_2dimensions_even, stack_4d_data, make_coherent_image, make_detector_image, average_data, mask_hot_pixels, make_coordinates, filter_images, load_hdf_roi
+from ..data_fs import list_datafiles, make_2dimensions_even, stack_4d_data, make_coherent_image, make_detector_image, average_data, mask_hot_pixels, make_coordinates, filter_images, load_hdf_roi, sum_pool2d_array
 from ..xrays_fs import compute_vectors
 from  ..plotting_fs import plot_roi_from_numpy
 
@@ -23,7 +23,9 @@ class load_data:
     
     def __init__(self, directory:str, scan_num: int, 
                  
-                 det_psize:float, det_distance:float, centre_pixel:tuple[int], wavelength:float, slow_axis:int):
+                 det_psize:float, det_distance:float, 
+                 centre_pixel:tuple[int], wavelength:float, 
+                 slow_axis:int):
         
         self.det_psize = det_psize
         self.det_distance = det_distance
@@ -44,14 +46,14 @@ class load_data:
         self.fnames = list_datafiles(self.dir)[:-2]        
         
 
-    def make_4d_dataset(self, roi_name: str):
+    def make_4d_dataset(self, roi_name: str, mask_coh_img):
         
         """
         Makes the 4D data set around from a ROI on detector.
         """
         self.ptychographs[roi_name] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name], conc=True)
         
-        self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name])
+        self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], mask_coh_img=mask_coh_img)
     def plot_full_detector(self, file_no, frame_no, 
                           
                           vmin1=None, vmax1=None, 
@@ -234,7 +236,7 @@ class load_data:
     def mask_roi(self, roi_name, hot_pixels = True, mask_val=1):
         
         if hot_pixels:
-            self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name])
+            self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], mask_coh_img=self.mask_coh_img)
             
     def plot_average_roi(self, roi_name, vmin=None, vmax=None, title=None):
             
@@ -284,16 +286,28 @@ class load_data:
         self.coords[roi_name] = make_coordinates(self.averaged_data[roi_name], mask_val, self.rois_dict[roi_name], crop=False)
         
         self.kouts[roi_name] = compute_vectors(self.coords[roi_name], self.det_distance, self.det_psize, self.centre_pixel, self.wavelength)
+
+    def pool_detector_space(self, roi_name, kernel_size, stride=None, padding=0):
+
+        self.ptychographs[roi_name] = sum_pool2d_array(self.ptychographs[roi_name], kernel_size=kernel_size, stride=stride, padding=padding)
+
     
-    
-    def prepare_roi(self, roi_name:str, mask_val: float, variance_threshold:float):
+    def prepare_roi(self, roi_name:str, 
+                    mask_val: float, 
+                    variance_threshold:float, 
+                    pool_det = None, 
+                    mask_coherent_images:bool = False):
         """
         full preparating of the roi, after running add_roi.
         roi_name (string): name of the roi. 
         mask_val (float): masks values on detector to include in the coords array.
+        pool_det (tuple): if passed then (kernel_size, stride, padding)
         variance_threshold (float): value of the threshold for filtering the coherent images. 
         """
-        self.make_4d_dataset(roi_name=roi_name)
+        
+        self.make_4d_dataset(roi_name=roi_name, mask_coh_img=mask_coherent_images)
+        if pool_det is not None:
+            self.pool_detector_space(roi_name, *pool_det)
         self.average_frames_roi(roi_name=roi_name)
         self.make_kvector(roi_name=roi_name,mask_val= mask_val)
         self.make_coherent_images(roi_name=roi_name)
