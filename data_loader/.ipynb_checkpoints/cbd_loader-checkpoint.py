@@ -205,7 +205,8 @@ class load_data:
         im = ax.imshow(img_list[0], cmap='plasma', vmin=vmin, vmax=vmax)
         ax.set_title(f"Coherent Image {0}/{num_images - 1}")
         plt.colorbar(im, ax=ax, label="Intensity")
-
+        plt.tight_layout()
+        
         def update_image(img_idx):
             """Updates the displayed image when the slider is moved."""
             img = img_list[img_idx]
@@ -223,7 +224,7 @@ class load_data:
         interactive_plot = widgets.interactive(update_image, img_idx=img_slider)
 
         display(interactive_plot)  # Show slider
-        display(fig)  # Display the figure
+        #display(fig)  # Display the figure
         
     def average_frames_roi(self, roi_name):
         

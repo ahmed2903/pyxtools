@@ -280,7 +280,7 @@ def update_live_plot(img_amp, img_phase, hr_obj_image, fig):
     
     #img_amp.autoscale()  # Reset autoscaling
     img_amp.set_clim(vmin, vmax)
-    img_phase.auto_scale()
+    #img_phase.auto_scale()
     
     #plt.colorbar(img_amp, ax=axes[0])
     #clear_output(wait=True)
