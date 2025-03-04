@@ -372,14 +372,12 @@ def make_2dimensions_even(array_list):
     for i in range(len(target_shape)):
         if target_shape[i] % 2 != 0:  # If dimension is odd
             target_shape[i] += 1  # Make it even by adding 1
-            print(f"padding {i}")
 
     # Calculate the padding required for each dimension
     padding = (0, 0, target_shape[0] - ref_shp[0], target_shape[1] - ref_shp[1] ) 
     # Pad the arrays if necessary
     padded_arrays = []
     for array in array_list:
-        
         # Apply padding
         padded_array = gf.pad_2d(array, *padding)
         padded_arrays.append(padded_array)

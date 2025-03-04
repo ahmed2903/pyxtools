@@ -245,19 +245,19 @@ def initialize_live_plot(hr_obj_image):
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
             
     # Initialize the plots with the initial image
-    mag_plot = axes[0].imshow(np.abs(hr_obj_image), vmin =.2, vmax = 1, cmap='viridis')
+    img_amp = axes[0].imshow(np.abs(hr_obj_image), vmin =.2, vmax = 1, cmap='viridis')
     axes[0].set_title("Amplitude of Object")
-    plt.colorbar(mag_plot, ax=axes[0])
+    plt.colorbar(img_amp, ax=axes[0])
 
-    phase_plot = axes[1].imshow(np.angle(hr_obj_image), vmin = -np.pi, vmax = np.pi, cmap='viridis')
+    img_phase = axes[1].imshow(np.angle(hr_obj_image), vmin = -np.pi, vmax = np.pi, cmap='viridis')
     axes[1].set_title("Phase of Object")
-    plt.colorbar(phase_plot, ax=axes[1])
+    plt.colorbar(img_amp, ax=axes[1])
 
     plt.tight_layout()
     plt.ion()  # Enable interactive mode
     plt.show()
 
-    return fig, ax, img_amp, img_phase
+    return fig, axes, img_amp, img_phase
 
 def update_live_plot(img_amp, img_phase, hr_obj_image, fig):
     """
@@ -276,10 +276,13 @@ def update_live_plot(img_amp, img_phase, hr_obj_image, fig):
 
     amp_mean = np.mean(amplitude)
     vmin = amp_mean - 0.1 * amp_mean
-    vmax = amp_mean + 0.1 * amp_mean
-    img_amp.autoscale()  # Reset autoscaling
+    vmax = amp_mean + 0.2 * amp_mean
+    
+    #img_amp.autoscale()  # Reset autoscaling
     img_amp.set_clim(vmin, vmax)
-    plt.colorbar(mag_plot, ax=axes[0])
+    img_phase.auto_scale()
+    
+    #plt.colorbar(img_amp, ax=axes[0])
     #clear_output(wait=True)
     display(fig)
     #fig.canvas.draw()
