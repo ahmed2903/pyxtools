@@ -14,8 +14,9 @@ from matplotlib.widgets import Button, TextBox
 from matplotlib.patches import Rectangle
 import ipywidgets as widgets
 from IPython.display import display
+import concurrent
 
-from ..data_fs import list_datafiles, make_2dimensions_even, stack_4d_data, make_coherent_image, make_detector_image, average_data, mask_hot_pixels, make_coordinates, filter_images, load_hdf_roi, sum_pool2d_array
+from ..data_fs import * 
 from ..xrays_fs import compute_vectors
 from  ..plotting_fs import plot_roi_from_numpy
 
@@ -38,7 +39,7 @@ class load_data:
         self.rois_dict = {}
         self.ptychographs = {}
         self.averaged_data = {}
-        
+        self.images_object = {}
         self.coords = {}
         self.kouts = {}
         self.coherent_imgs = {}
@@ -46,14 +47,15 @@ class load_data:
         self.fnames = list_datafiles(self.dir)[:-2]        
         
 
-    def make_4d_dataset(self, roi_name: str, mask_coh_img):
+    def make_4d_dataset(self, roi_name: str, mask_max_coh=False, mask_min_coh= False):
         
         """
         Makes the 4D data set around from a ROI on detector.
         """
         self.ptychographs[roi_name] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name], conc=True)
         
-        self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], mask_coh_img=mask_coh_img)
+        self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], mask_max_coh = mask_max_coh, mask_min_coh=mask_min_coh)
+        
     def plot_full_detector(self, file_no, frame_no, 
                           
                           vmin1=None, vmax1=None, 
@@ -149,7 +151,7 @@ class load_data:
         axes[0].add_patch(rect_coherent)
         plt.colorbar(im0, ax=axes[0], label="Intensity")
 
-        im1 = axes[1].imshow(detector_image, cmap='plasma', vmin=vmin_d, vmax=vmax_d)
+        im1 = axes[1].imshow(detector_image, cmap='viridis', vmin=vmin_d, vmax=vmax_d)
         axes[1].set_title(f"Detector Image (px={px_slider.value}, py={py_slider.value})")
         rect_detector = Rectangle((px_slider.value - rectangle_size_det / 2, py_slider.value - rectangle_size_det / 2), 
                                   rectangle_size_det, rectangle_size_det, 
@@ -204,7 +206,7 @@ class load_data:
         
         # Initial image
         vmin, vmax = np.min(img_list[0]), np.max(img_list[0])  # Normalize color scale
-        im = ax.imshow(img_list[0], cmap='plasma', vmin=vmin, vmax=vmax)
+        im = ax.imshow(img_list[0], cmap='viridis') #, vmin=vmin, vmax=vmax)
         ax.set_title(f"Coherent Image {0}/{num_images - 1}")
         plt.colorbar(im, ax=ax, label="Intensity")
         plt.tight_layout()
@@ -214,7 +216,7 @@ class load_data:
             img = img_list[img_idx]
             img_mean = np.mean(img)
             vmin = img_mean - 0.05 * img_mean
-            vmax = img_mean + 0.05 * img_mean
+            vmax = img_mean + 0.2 * img_mean
             
             im.set_data(img)  # Update image data
             im.set_clim(vmin, vmax)
@@ -284,34 +286,136 @@ class load_data:
     def make_kvector(self, roi_name, mask_val):
         
         self.coords[roi_name] = make_coordinates(self.averaged_data[roi_name], mask_val, self.rois_dict[roi_name], crop=False)
-        
         self.kouts[roi_name] = compute_vectors(self.coords[roi_name], self.det_distance, self.det_psize, self.centre_pixel, self.wavelength)
 
     def pool_detector_space(self, roi_name, kernel_size, stride=None, padding=0):
-
+        print("Pooling Detector")
         self.ptychographs[roi_name] = sum_pool2d_array(self.ptychographs[roi_name], kernel_size=kernel_size, stride=stride, padding=padding)
 
+    def remove_coh_background(self, roi_name, sigma):
+        print("Removing Background")
+        self.coherent_imgs[roi_name] = remove_background_parallel(self.coherent_imgs[roi_name], sigma=sigma)
+
+    def filter_by_median(self, roi_name, kernel_size, stride, threshold):
+        print("Median Filtering Pixels")
+        self.coherent_imgs[roi_name] = median_filter_parallel(self.coherent_imgs[roi_name], 
+                                                              kernel_size = kernel_size, 
+                                                              stride = stride, 
+                                                              threshold=threshold, 
+                                                              n_jobs=32)
+
+    def detect_object(self, roi_name, threshold, min_val, max_val):
+        print("Running Detect Object")
+        self.images_object[roi_name] = detect_obj_parallel(self.coherent_imgs[roi_name], threshold=threshold)
+        mask = [np.sum(im) > min_val and np.sum(im) < max_val for im in self.images_object[roi_name]]
+
+        
+        self.coherent_imgs[roi_name] = np.array(self.coherent_imgs[roi_name])[mask]
+        self.kouts[roi_name] = np.array(self.kouts[roi_name])[mask]
+        self.coords[roi_name] = np.array(self.coords[roi_name])[mask]
+        
+    def plot_detected_objects(self, roi_name):
+        """Displays a list of coherent images and allows scrolling through them via a slider."""
+        
+        img_list = self.images_object[roi_name]  # List of coherent images
+
+        num_images = len(img_list)  # Number of images in the list
+        
+        # Create a slider for selecting the image index
+        img_slider = widgets.IntSlider(min=0, max=num_images - 1, value=0, description="Image")
+
+        # Create figure & axis once
+        fig, ax = plt.subplots(figsize=(6, 6))
+        
+        # Initial image
+        vmin, vmax = 0,1 # Normalize color scale
+        im = ax.imshow(img_list[0], cmap='viridis') #, vmin=vmin, vmax=vmax)
+        ax.set_title(f"Coherent Image {0}/{num_images - 1}")
+        plt.colorbar(im, ax=ax, label="Intensity")
+        plt.tight_layout()
+        
+        def update_image(img_idx):
+            """Updates the displayed image when the slider is moved."""
+            img = img_list[img_idx]
+            im.set_data(img)  # Update image data
+            
+            ax.set_title(f"Coherent Image {img_idx}/{num_images - 1}")  # Update title
+            fig.canvas.draw_idle()  # Efficient redraw
+
+        # Create interactive slider
+        interactive_plot = widgets.interactive(update_image, img_idx=img_slider)
+
+        display(interactive_plot)  # Show slider
+        #display(fig)  # Display the figure
+
+    def normalise_detector(self, roi_name_ref, roi_name_op):
+
+        try:
+            peak_intensity = np.sum(self.ptychographs[roi_name_ref], axis=(-2,-1))
+        except: 
+            self.ptychographs[roi_name_ref] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name_ref], conc=True)
+            self.ptychographs[roi_name_ref] = mask_hot_pixels(self.ptychographs[roi_name_ref])
+            peak_intensity = np.sum(self.ptychographs[roi_name_ref], axis=(-2,-1))
+        
+        avg_intensity = np.mean(peak_intensity)
+        self.ptychographs[roi_name_op] = self.ptychographs[roi_name_op]/peak_intensity[...,np.newaxis, np.newaxis] * avg_intensity
+        
+
+    def mask_region_cohimgs(self, roi_name, region):
+        
+        sx,ex,sy,ey = region
+        self.coherent_imgs[roi_name] = np.array(self.coherent_imgs[roi_name])
+        self.coherent_imgs[roi_name][:,sx:ex,sy:ey] = np.median(self.coherent_imgs[roi_name], axis = (1,2))[:,np.newaxis, np.newaxis]
     
     def prepare_roi(self, roi_name:str, 
                     mask_val: float, 
-                    variance_threshold:float, 
+                    mask_max_coh:bool = False,
+                    mask_min_coh: bool = False,
                     pool_det = None, 
-                    mask_coherent_images:bool = False):
+                    normalisation_roi = None
+                    ):
         """
-        full preparating of the roi, after running add_roi.
+        full preparation of the roi, after running add_roi.
         roi_name (string): name of the roi. 
         mask_val (float): masks values on detector to include in the coords array.
         pool_det (tuple): if passed then (kernel_size, stride, padding)
+        background_sigma (float): Gaussian sigma for background subtraction
         variance_threshold (float): value of the threshold for filtering the coherent images. 
         """
         
-        self.make_4d_dataset(roi_name=roi_name, mask_coh_img=mask_coherent_images)
+        self.make_4d_dataset(roi_name=roi_name, mask_max_coh = mask_max_coh, mask_min_coh=mask_min_coh)
+        if normalisation_roi is not None:
+            self.normalise_detector(normalisation_roi, roi_name)
+            
         if pool_det is not None:
             self.pool_detector_space(roi_name, *pool_det)
         self.average_frames_roi(roi_name=roi_name)
         self.make_kvector(roi_name=roi_name,mask_val= mask_val)
+
+    def prepare_coherent_images(self, roi_name:str, 
+                                mask_region = None,
+                                variance_threshold = None, 
+                                background_sigma = None, 
+                                median_params = None, # tuple (kernel_size, stride, frac threshold)
+                                detect_params = None, #tuple (threshold, min_val, mask_val)
+                                ):
+            
         self.make_coherent_images(roi_name=roi_name)
-        self.filter_coherent_images(roi_name=roi_name, variance_threshold=variance_threshold)
-        self.even_dims_cohimages(roi_name=roi_name)
+        if mask_region is not None:
+            self.mask_region_cohimgs(roi_name, mask_region)
+            
+        if variance_threshold is not None:
+            self.filter_coherent_images(roi_name=roi_name, variance_threshold=variance_threshold)
         
+        if background_sigma is not None:
+            self.remove_coh_background(roi_name, background_sigma) 
     
+        self.even_dims_cohimages(roi_name=roi_name)
+        if median_params is not None:
+            self.filter_by_median(roi_name, *median_params)
+
+        if detect_params is not None:
+            self.detect_object(roi_name, *detect_params)
+            
+        #self.filter_coherent_images(roi_name=roi_name, variance_threshold=variance_threshold)
+        

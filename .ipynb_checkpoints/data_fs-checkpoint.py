@@ -14,6 +14,10 @@ import torch
 import torch.nn.functional as F
 from skimage.registration import phase_cross_correlation
 from scipy.ndimage import fourier_shift
+import numpy as np
+import scipy.ndimage as ndimage
+
+import scipy.fft
 from . import xrays_fs as xf
 from . import general_fs as gf
 
@@ -88,7 +92,7 @@ def average_data(data_folder, names_array, roi, conc=False):
         
     t2=time.perf_counter()
 
-    print(f"finsihed in {t2-t1}")
+    print(f"Averaging finsihed in {t2-t1: .2f}s")
     
     return average_data
 
@@ -141,7 +145,7 @@ def stack_4d_data(data_folder,names_array,roi, slow_axis = 0, conc = False):
         all_data = np.array(all_data)
     t2=time.perf_counter()
 
-    print(f"finsihed in {t2-t1}")
+    print(f"Stacking finsihed in {t2-t1: .2f}s")
     
         
     stacked_data = np.stack(all_data, axis=0)
@@ -196,7 +200,7 @@ def sum_pool2d_array(input_array, kernel_size, stride=None, padding=0):
         input_tensor = input_array  
     
     # Perform sum pooling
-    pooled = F.avg_pool2d(input_tensor, kernel_size, stride, padding) * (kernel_size**2)
+    pooled = F.avg_pool2d(input_tensor, kernel_size, stride, padding) #* (kernel_size**2)
     
     # Convert back to NumPy array if input was NumPy
     if is_numpy:
@@ -235,7 +239,9 @@ def make_coordinates(array, mask_val, roi, crop):
 
     return coords
 
-def mask_hot_pixels(array, mask_coh_img=False):
+
+    
+def mask_hot_pixels(array, mask_max_coh=False, mask_min_coh= False):
     """
     Masks hot pixels (maximum values in the last two dimensions) in a 4D array.
     
@@ -249,8 +255,10 @@ def mask_hot_pixels(array, mask_coh_img=False):
     if len(array.shape)>3:
         # Find the maximum value along the last two dimensions (x, y) for each (N, M)
         max_values = np.max(array, axis=(2, 3), keepdims=True)
-        if mask_coh_img:
+        if mask_max_coh:
             max_values_coh = np.max(array, axis=(0, 1), keepdims=True)
+        if mask_min_coh:
+            min_values_coh = np.min(array, axis=(0, 1), keepdims=True)
             
     if len(array.shape) == 2:
         max_values = np.max(array, axis=(0, 1), keepdims=True)
@@ -258,9 +266,13 @@ def mask_hot_pixels(array, mask_coh_img=False):
         max_values = np.max(array, axis=(1, 2), keepdims=True)
     # Mask all the values equal to the maximum value in the 2D slice with NaN (or 0)
     masked_array = np.where(array == max_values, 0.0, array)
-    if mask_coh_img:
-        masked_array = np.where(masked_array == max_values_coh, 0.0, masked_array)
-        
+    
+    med = np.median(masked_array, axis = (0,1))
+    if mask_max_coh:
+        masked_array = np.where(masked_array == max_values_coh, med, masked_array)
+    if mask_min_coh:
+        masked_array = np.where(masked_array == min_values_coh, med, masked_array)
+    
     return masked_array
 
 def estimate_pupil_size(array, mask_val, pixel_size, pupil_roi, crop=True):
@@ -379,14 +391,14 @@ def make_2dimensions_even(array_list):
             target_shape[i] += 1  # Make it even by adding 1
 
     # Calculate the padding required for each dimension
-    padding = (0, 0, target_shape[0] - ref_shp[0], target_shape[1] - ref_shp[1] ) 
-    # Pad the arrays if necessary
-    padded_arrays = []
-    for array in array_list:
-        # Apply padding
-        padded_array = gf.pad_2d(array, *padding)
-        padded_arrays.append(padded_array)
-
+    padding = ((0,target_shape[0] - ref_shp[0]), (0,target_shape[1] - ref_shp[1]))
+    
+    def process_array(array):
+        padded_array = np.pad(array, padding, mode='median')
+        return padded_array
+        
+    padded_arrays = Parallel(n_jobs=4)(delayed(process_array)(arr) for arr in array_list)
+    
     return padded_arrays
 
 
@@ -439,67 +451,64 @@ def filter_images(images, coords, variance_threshold, kin_coords=None, **kwargs)
 
     # Return results
     if kin_coords is not None:
-        if entropies is not None:
-            return filtered_images, filtered_coords, filtered_kin_coords, entropies
         return filtered_images, filtered_coords, filtered_kin_coords
     else:
-        if entropies is not None:
-            return filtered_images, filtered_coords, entropies
         return filtered_images, filtered_coords
     
 
-def align_images(images, upsample_factor=100):
-    """
-    Aligns 2D images, corrects for relative shifts, and returns corrected images along with the phase factors.
-
-    Based on Mansi's code
-    
-    Input:
-    images : list  of 2D images containing the same object.
-    upsample_factor : The upsampling factor for subpixel accuracy (default: 100).
-
-    Returns:
-    corrected_images : The aligned (shift-corrected) images.
-    shifts : The relative shifts (dy, dx) for each image relative to the first image.
-    phase_factors : The phase factors applied in Fourier space for each shift.
-    """
-    # Use the first image as the reference
-    ref_image = images[0]
-    
-    # Prepare outputs
-    corrected_images = []
-    shifts = []
-    phase_factors = []
-    
-    for i, img in enumerate(images):
-        # Compute relative shift between the reference and the current image
-        shift, error, diffphase = phase_cross_correlation(
-            ref_image, img, upsample_factor=upsample_factor
-        )
-        shifts.append(shift)
-        
-        # Apply Fourier-domain shift correction
-        shifted_image_fft = fourier_shift(np.fft.fftn(img), shift)
-        corrected_image = np.fft.ifftn(shifted_image_fft).real
-        corrected_images.append(corrected_image)
-        
-        # Calculate phase factor for the shift
-        ny, nx = img.shape
-        y = np.fft.fftfreq(ny)[:, np.newaxis]
-        x = np.fft.fftfreq(nx)
-        phase_factor = np.exp(-2j * np.pi * (shift[0] * y + shift[1] * x))
-        phase_factors.append(phase_factor)
-    
-    return corrected_images, shifts, phase_factors
 
 
+def phase_correlation(ref_img, shifted_img):
+    """Compute shift between two images using phase correlation."""
+    # Compute Fourier Transforms
+    ref_fft = scipy.fft.fft2(ref_img)
+    shifted_fft = scipy.fft.fft2(shifted_img)
+    
+    # Compute cross-power spectrum
+    cross_power = (ref_fft * np.conj(shifted_fft)) / np.abs(ref_fft * np.conj(shifted_fft))
+    
+    # Inverse FFT to get correlation peak
+    correlation = scipy.fft.ifft2(cross_power)
+    correlation = np.abs(scipy.fft.fftshift(correlation))
+
+    # Find peak location (gives the shift)
+    max_loc = np.unravel_index(np.argmax(correlation), correlation.shape)
+    shift = np.array(max_loc) - np.array(ref_img.shape) // 2  # Shift relative to center
+    
+    return -shift  # Invert shift to align image
+
+def align_images(image_list):
+    """Align a list of shifted images based on the first image."""
+    aligned_images = []
+    ref_img = image_list[0]  # Use first image as reference
+    
+    for img in image_list:
+        shift = phase_correlation(ref_img, img)  # Find shift
+        aligned_img = scipy.ndimage.shift(img, shift, mode='constant')  # Apply shift
+        aligned_images.append(aligned_img)
+    
+    return aligned_images
+
+
+def remove_background(image, sigma=20):
+    """Removes smooth background by subtracting a Gaussian-blurred version of the image."""
+    background = ndimage.gaussian_filter(image, sigma=sigma)
+    tmp = image-background
+    inverted = np.max(tmp) - tmp
+    return inverted
+
+def remove_background_parallel(image_list, sigma=20, n_jobs = 8):
+    """Applies background removal to all images in a list using multiprocessing."""
+    result = Parallel(n_jobs=n_jobs)(delayed(remove_background)(im, sigma) for im in image_list)
+    return result
+    
 def upsample_image(im, zoom_factor):
     """
     Upsample a single image using zoom.
     """
     return zoom(im, zoom_factor, order=3).astype(complex)
 
-def upsample_images(images, zoom_factor, n_jobs=-1):
+def upsample_images(images, zoom_factor, n_jobs=4):
     """
     Upsample a list of images in parallel.
 
@@ -515,3 +524,93 @@ def upsample_images(images, zoom_factor, n_jobs=-1):
     up_images = Parallel(n_jobs=n_jobs)(delayed(upsample_image)(im, zoom_factor) for im in images)
 
     return np.array(up_images)
+
+def detect_object(image, threshold_factor=0.5):
+    """Detects the object by thresholding and finding the largest connected component."""
+    # Normalize the image
+    image_norm = (image - np.min(image)) / (np.max(image) - np.min(image) + 1e-10)
+
+    # Apply adaptive thresholding
+    threshold = threshold_factor * np.max(image_norm)
+    binary_mask = image_norm > threshold  # Object is where intensity is above the threshold
+
+    # Label connected components
+    labeled, num_features = ndimage.label(binary_mask)
+
+    if num_features == 0:
+        return None  # No object detected
+
+    # Find the largest connected component (assuming it's the object)
+    object_sizes = ndimage.sum(binary_mask, labeled, range(num_features + 1))
+    largest_object_label = np.argmax(object_sizes[1:]) + 1  # Ignore background (label 0)
+    
+    return labeled == largest_object_label  # Return object mask
+
+def detect_obj_parallel(image_list, threshold=.1, n_jobs = 8):
+    """Applies background removal to all images in a list using multiprocessing."""
+    result = Parallel(n_jobs=n_jobs)(delayed(detect_object)(im, threshold) for im in image_list)
+    return result
+
+
+from scipy.ndimage import uniform_filter
+
+def median_filter(image, kernel_size, stride, threshold):
+    """
+    Applies a median-based filter to an image to replace bad pixels.
+
+    Parameters:
+        image (numpy.ndarray): Input 2D image.
+        kernel_size (int): Size of the sliding window (kernel) for computing the median.
+        stride (int): Step size for moving the kernel across the image.
+        threshold (float): Values outside `median * threshold` are replaced with the median.
+
+    Returns:
+        numpy.ndarray: Filtered image.
+    """
+    # Pad the image to handle edge cases
+    pad_size = kernel_size // 2
+    padded_image = np.pad(image, pad_size, mode='reflect')
+
+    # Initialize the output image
+    filtered_image = np.copy(image)
+
+    # Iterate over the image with the given stride
+    for i in range(0, image.shape[0], stride):
+        for j in range(0, image.shape[1], stride):
+            # Define the region of interest (ROI) in the padded image
+            roi = padded_image[i:i + kernel_size, j:j + kernel_size]
+
+            # Compute the median of the ROI
+            median_value = np.median(roi)
+
+            # Define the bounds for valid pixels
+            lower_bound = median_value / threshold
+            upper_bound = median_value * threshold
+
+            # Replace outliers in the original image
+            roi_original = filtered_image[i:i + kernel_size, j:j + kernel_size]
+            outliers = (roi_original < lower_bound) | (roi_original > upper_bound)
+            roi_original[outliers] = median_value
+
+    return filtered_image
+
+def median_filter_parallel(images, kernel_size, stride, threshold, n_jobs=32):
+    """
+    Applies the median filter to a list of images in parallel.
+
+    Parameters:
+        images (list of numpy.ndarray): List of input 2D images.
+        kernel_size (int): Size of the sliding window (kernel) for computing the median.
+        stride (int): Step size for moving the kernel across the image.
+        threshold (float): Values outside `median * threshold` are replaced with the median.
+        n_jobs (int): Number of jobs to run in parallel. Default is -1 (use all available cores).
+
+    Returns:
+        list of numpy.ndarray: List of filtered images.
+    """
+    # Use joblib to parallelize the median filter application
+    filtered_images = Parallel(n_jobs=n_jobs)(
+        delayed(median_filter)(image, kernel_size, stride, threshold) for image in images
+    )
+
+    return filtered_images

@@ -7,7 +7,7 @@ import pyvista as pv
 from matplotlib.patches import Rectangle
 from IPython.display import display
 from PIL import Image 
-
+import ipywidgets as widgets
 
 def create_gif_from_arrays(array_list, gif_name, fps=10, cmap="viridis"):
     """
@@ -50,7 +50,7 @@ def create_gif_from_arrays(array_list, gif_name, fps=10, cmap="viridis"):
         import os
         os.remove(file)
 
-def plot_roi_from_numpy(array, roi, name, vmin=None, vmax=None, save = False, **kwargs):
+def plot_roi_from_numpy(array, roi=None, name=None, vmin=None, vmax=None, save = False, **kwargs):
 
     """
     Plots a region of interest from a 2D numpy array
@@ -64,6 +64,11 @@ def plot_roi_from_numpy(array, roi, name, vmin=None, vmax=None, save = False, **
         save: bool, if True, saves the plot
         frame: int, frame number if array is 3D 
     """
+    if roi is None:
+        roi = [0,-1,0,-1]
+
+    if name is None:
+        name = "Plot"
 
     # Plot the pupil
     if len(array.shape) == 3 and 'frame' in kwargs:
@@ -247,11 +252,11 @@ def initialize_live_plot(hr_obj_image):
     # Initialize the plots with the initial image
     img_amp = axes[0].imshow(np.abs(hr_obj_image), vmin =.2, vmax = 1, cmap='viridis')
     axes[0].set_title("Amplitude of Object")
-    plt.colorbar(img_amp, ax=axes[0])
+    cbar_amp = plt.colorbar(img_amp, ax=axes[0])
 
     img_phase = axes[1].imshow(np.angle(hr_obj_image), vmin = -np.pi, vmax = np.pi, cmap='viridis')
     axes[1].set_title("Phase of Object")
-    plt.colorbar(img_amp, ax=axes[1])
+    cbar_phase = plt.colorbar(img_phase, ax=axes[1])
 
     plt.tight_layout()
     plt.ion()  # Enable interactive mode
@@ -278,14 +283,10 @@ def update_live_plot(img_amp, img_phase, hr_obj_image, fig):
     vmin = amp_mean - 0.1 * amp_mean
     vmax = amp_mean + 0.2 * amp_mean
     
-    #img_amp.autoscale()  # Reset autoscaling
     img_amp.set_clim(vmin, vmax)
-    #img_phase.auto_scale()
     
-    #plt.colorbar(img_amp, ax=axes[0])
-    #clear_output(wait=True)
+    clear_output(wait=True)
     display(fig)
-    #fig.canvas.draw()
     fig.canvas.flush_events()
     
 def plot_images_side_by_side(image1, image2, 
@@ -338,4 +339,44 @@ def plot_images_side_by_side(image1, image2,
     plt.tight_layout()
     if show:
         plt.show()
+
+
+def plot_list_slider(img_list, vmin1 = None, vmax1 = None):
+    """Displays a list of coherent images and allows scrolling through them via a slider."""
+    
+
+    num_images = len(img_list)  # Number of images in the list
+    
+    # Create a slider for selecting the image index
+    img_slider = widgets.IntSlider(min=0, max=num_images - 1, value=0, description="Image")
+
+    # Create figure & axis once
+    fig, ax = plt.subplots(figsize=(6, 6))
+    
+    # Initial image
+    vmin, vmax = np.min(img_list[0]), np.max(img_list[0])  # Normalize color scale
+    im = ax.imshow(img_list[0], cmap='viridis', vmin=vmin1, vmax=vmax1)
+    ax.set_title(f"Image {0}/{num_images - 1}")
+    plt.colorbar(im, ax=ax, label="Intensity")
+    plt.tight_layout()
+    
+    def update_image(img_idx):
+        """Updates the displayed image when the slider is moved."""
+        img = img_list[img_idx]
+        img_mean = np.mean(img)
+
+        vmin1 = img_mean - 0.05 * img_mean
         
+        vmax1 = img_mean + 0.2 * img_mean
+        
+        im.set_data(img)  # Update image data
+        im.set_clim(vmin1, vmax1)
+        
+        ax.set_title(f"Image {img_idx}/{num_images - 1}")  # Update title
+        fig.canvas.draw_idle()  # Efficient redraw
+
+    # Create interactive slider
+    interactive_plot = widgets.interactive(update_image, img_idx=img_slider)
+
+    display(interactive_plot)  # Show slider
+    #display(fig)  # Display the figure
