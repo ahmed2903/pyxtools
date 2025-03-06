@@ -614,3 +614,73 @@ def median_filter_parallel(images, kernel_size, stride, threshold, n_jobs=32):
     )
 
     return filtered_images
+
+def pad_to_double(image_list):
+    """
+    Pads each 2D numpy array in a list to double its size.
+    The original image will be centered in the padded output.
+    
+    Args:
+        image_list: List of 2D numpy arrays
+        
+    Returns:
+        List of padded 2D numpy arrays, each with double the dimensions
+    """
+    padded_images = []
+    
+    for img in image_list:
+        # Get original dimensions
+        h, w = img.shape
+        
+        # Calculate padding for each side
+        pad_h = h // 2
+        pad_w = w // 2
+        
+        # Pad the image with zeros
+        padded_img = np.pad(img, ((pad_h, pad_h), (pad_w, pad_w)), mode='constant', constant_values=0)
+        
+        padded_images.append(padded_img)
+    
+    return padded_images
+
+def exctract_centres_parallel(image_list, n_jobs=8):
+    """
+    Slices the center of each 2D numpy array in a list,
+    keeping only half the size in each dimension.
+    
+    Args:
+        image_list: List of 2D numpy arrays
+        
+    Returns:
+        List of center-sliced 2D numpy arrays, each with half the dimensions
+    """
+    # Use joblib to parallelize the median filter application
+    sliced_images = Parallel(n_jobs=n_jobs)(
+        delayed(median_filter)(image) for image in image_list
+    
+    )
+    return sliced_images
+    
+def extract_centre(img):
+    """
+    Slices the center of a 2D numpy array, keeping only half the size in each dimension.
+    
+    Args:
+        img: A 2D numpy array
+        
+    Returns:
+        Center-sliced 2D numpy array with half the dimensions
+    """
+    # Get original dimensions
+    h, w = img.shape
+    
+    # Calculate start and end indices for slicing
+    h_start = h // 4
+    h_end = h - h_start
+    w_start = w // 4
+    w_end = w - w_start
+    
+    # Slice the center of the image
+    sliced_img = img[h_start:h_end, w_start:w_end]
+    
+    return sliced_img
