@@ -643,6 +643,49 @@ def pad_to_double(image_list):
     
     return padded_images
 
+def pad_to_double(img):
+    """
+    Pads each 2D numpy array in a list to double its size.
+    The original image will be centered in the padded output.
+    
+    Args:
+        image_list: List of 2D numpy arrays
+        
+    Returns:
+        List of padded 2D numpy arrays, each with double the dimensions
+    """
+    
+    # Get original dimensions
+    h, w = img.shape
+    
+    # Calculate padding for each side
+    pad_h = h // 2
+    pad_w = w // 2
+    
+    # Pad the image with zeros
+    padded_img = np.pad(img, ((pad_h, pad_h), (pad_w, pad_w)), mode='constant', constant_values=0)
+    
+    return padded_img
+
+def pad_to_double_parallel(image_list, n_jobs=8):
+    """
+    Slices the center of each 2D numpy array in a list,
+    keeping only half the size in each dimension.
+    
+    Args:
+        image_list: List of 2D numpy arrays
+        
+    Returns:
+        List of center-sliced 2D numpy arrays, each with half the dimensions
+    """
+    # Use joblib to parallelize the median filter application
+    padded_images = Parallel(n_jobs=n_jobs)(
+        delayed(pad_to_double)(image) for image in image_list
+    
+    )
+    return padded_images
+
+
 def exctract_centres_parallel(image_list, n_jobs=8):
     """
     Slices the center of each 2D numpy array in a list,
