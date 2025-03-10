@@ -13,10 +13,11 @@ from joblib import Parallel, delayed
 import torch 
 import torch.nn.functional as F
 from skimage.registration import phase_cross_correlation
-from scipy.ndimage import fourier_shift
+from scipy.ndimage import fourier_shift, gaussian_filter, binary_dilation
 import numpy as np
 import scipy.ndimage as ndimage
 
+import scipy
 import scipy.fft
 from . import xrays_fs as xf
 from . import general_fs as gf
@@ -474,16 +475,17 @@ def phase_correlation(ref_img, shifted_img):
     # Find peak location (gives the shift)
     max_loc = np.unravel_index(np.argmax(correlation), correlation.shape)
     shift = np.array(max_loc) - np.array(ref_img.shape) // 2  # Shift relative to center
+    return shift  # Invert shift to align image
     
-    return -shift  # Invert shift to align image
-
 def align_images(image_list):
     """Align a list of shifted images based on the first image."""
     aligned_images = []
     ref_img = image_list[0]  # Use first image as reference
+    aligned_images.append(ref_img)
     
     for img in image_list:
-        shift = phase_correlation(ref_img, img)  # Find shift
+        avg = np.mean(np.array(aligned_images), axis = 0)    
+        shift = phase_correlation(avg, img)  # Find shift
         aligned_img = scipy.ndimage.shift(img, shift, mode='constant')  # Apply shift
         aligned_images.append(aligned_img)
     
@@ -614,3 +616,180 @@ def median_filter_parallel(images, kernel_size, stride, threshold, n_jobs=32):
     )
 
     return filtered_images
+
+def pad_to_double(image_list):
+    """
+    Pads each 2D numpy array in a list to double its size.
+    The original image will be centered in the padded output.
+    
+    Args:
+        image_list: List of 2D numpy arrays
+        
+    Returns:
+        List of padded 2D numpy arrays, each with double the dimensions
+    """
+    padded_images = []
+    
+    for img in image_list:
+        # Get original dimensions
+        h, w = img.shape
+        
+        # Calculate padding for each side
+        pad_h = h // 2
+        pad_w = w // 2
+        
+        # Pad the image with zeros
+        padded_img = np.pad(img, ((pad_h, pad_h), (pad_w, pad_w)), mode='constant', constant_values=0)
+        
+        padded_images.append(padded_img)
+    
+    return padded_images
+
+def pad_to_double(img):
+    """
+    Pads each 2D numpy array in a list to double its size.
+    The original image will be centered in the padded output.
+    
+    Args:
+        image_list: List of 2D numpy arrays
+        
+    Returns:
+        List of padded 2D numpy arrays, each with double the dimensions
+    """
+    
+    # Get original dimensions
+    h, w = img.shape
+    
+    # Calculate padding for each side
+    pad_h = h // 2
+    pad_w = w // 2
+    
+    # Pad the image with zeros
+    padded_img = np.pad(img, ((pad_h, pad_h), (pad_w, pad_w)), mode='constant', constant_values=0)
+    
+    return padded_img
+
+def pad_to_double_parallel(image_list, n_jobs=8):
+    """
+    Slices the center of each 2D numpy array in a list,
+    keeping only half the size in each dimension.
+    
+    Args:
+        image_list: List of 2D numpy arrays
+        
+    Returns:
+        List of center-sliced 2D numpy arrays, each with half the dimensions
+    """
+    # Use joblib to parallelize the median filter application
+    padded_images = Parallel(n_jobs=n_jobs)(
+        delayed(pad_to_double)(image) for image in image_list
+    
+    )
+    return padded_images
+
+
+def exctract_centres_parallel(image_list, n_jobs=8):
+    """
+    Slices the center of each 2D numpy array in a list,
+    keeping only half the size in each dimension.
+    
+    Args:
+        image_list: List of 2D numpy arrays
+        
+    Returns:
+        List of center-sliced 2D numpy arrays, each with half the dimensions
+    """
+    # Use joblib to parallelize the median filter application
+    sliced_images = Parallel(n_jobs=n_jobs)(
+        delayed(median_filter)(image) for image in image_list
+    
+    )
+    return sliced_images
+    
+def extract_centre(img):
+    """
+    Slices the center of a 2D numpy array, keeping only half the size in each dimension.
+    
+    Args:
+        img: A 2D numpy array
+        
+    Returns:
+        Center-sliced 2D numpy array with half the dimensions
+    """
+    # Get original dimensions
+    h, w = img.shape
+    
+    # Calculate start and end indices for slicing
+    h_start = h // 4
+    h_end = h - h_start
+    w_start = w // 4
+    w_end = w - w_start
+    
+    # Slice the center of the image
+    sliced_img = img[h_start:h_end, w_start:w_end]
+    
+    return sliced_img
+
+def shrink_wrap_2d_numpy(input_data, threshold=0.2, sigma=4):
+    """
+    Applies the shrink-wrap method to create a mask around an object in a 2D NumPy array.
+    
+    Args:
+        input_data (np.ndarray): 2D input array (height, width).
+        threshold (float): Threshold for masking (relative to max value).
+        sigma (float): Standard deviation for Gaussian blur.
+    
+    Returns:
+        np.ndarray: Binary mask of the same shape as input_data.
+    """
+    if input_data.ndim != 2:
+        raise ValueError("Input data must be a 2D array.")
+
+    # Compute absolute values and normalize
+    abs_data = np.abs(input_data)
+    max_val = np.max(abs_data)
+
+    # Apply threshold to create initial binary mask
+    mask = np.where(abs_data < (threshold * max_val), 0, 1).astype(np.float32)
+
+    # Apply Gaussian smoothing
+    mask = gaussian_filter(mask, sigma=sigma)
+
+    # Re-apply threshold to refine the mask
+    mask = np.where(mask < threshold, 0, 1).astype(np.uint8)
+
+    return mask
+
+def shrink_wrap_parallel(image_list, threshold=0.2, sigma=4, n_jobs=8):
+    """
+    Slices the center of each 2D numpy array in a list,
+    keeping only half the size in each dimension.
+    
+    Args:
+        image_list: List of 2D numpy arrays
+        
+    Returns:
+        List of center-sliced 2D numpy arrays, each with half the dimensions
+    """
+    # Use joblib to parallelize the median filter application
+    mask = Parallel(n_jobs=n_jobs)(
+        delayed(shrink_wrap_2d_numpy)(image, threshold, sigma) for image in image_list
+    
+    )
+    return mask
+
+
+# Function to apply Gaussian blur to a list of objects
+def apply_gaussian_blur(arrays, sigma=1):
+    """
+    Apply Gaussian blur to a list of objects (NumPy arrays).
+
+    Parameters:
+    objects (list of numpy arrays): The list of objects to blur.
+    sigma (float): The standard deviation of the Gaussian kernel.
+
+    Returns:
+    list of numpy arrays: The blurred objects.
+    """
+    blurred_objects = [gaussian_filter(arr, sigma=sigma) for arr in arrays]
+    return blurred_objects

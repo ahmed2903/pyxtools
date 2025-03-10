@@ -282,7 +282,15 @@ class load_data:
         self.kouts[roi_name] = cleaned_kxky
         self.coords[roi_name] = cleaned_coords
         
-        
+    def plot_averag_coh_imgs(self, roi_name, vmin=None, vmax=None, title=None):
+
+        avg = np.mean(np.array(self.coherent_imgs[roi_name]), axis = 0)
+
+        if title is None:
+            title = f"Average Coherent Images {roi_name}"
+            
+        plot_roi_from_numpy(avg, name=title, vmin=vmin, vmax=vmax)
+    
     def make_kvector(self, roi_name, mask_val):
         
         self.coords[roi_name] = make_coordinates(self.averaged_data[roi_name], mask_val, self.rois_dict[roi_name], crop=False)
@@ -304,6 +312,11 @@ class load_data:
                                                               threshold=threshold, 
                                                               n_jobs=32)
 
+    def blur_detected_objs(self, roi_name, sigma):
+
+        self.images_object[roi_name] = apply_gaussian_blur(self.images_object[roi_name], sigma=sigma)
+    
+    
     def detect_object(self, roi_name, threshold, min_val, max_val):
         print("Running Detect Object")
         self.images_object[roi_name] = detect_obj_parallel(self.coherent_imgs[roi_name], threshold=threshold)
@@ -392,12 +405,18 @@ class load_data:
         self.average_frames_roi(roi_name=roi_name)
         self.make_kvector(roi_name=roi_name,mask_val= mask_val)
 
+    def align_coherent_images(self, roi_name):
+
+        self.coherent_imgs[roi_name] = align_images(self.coherent_imgs[roi_name])
+        
     def prepare_coherent_images(self, roi_name:str, 
                                 mask_region = None,
                                 variance_threshold = None, 
                                 background_sigma = None, 
                                 median_params = None, # tuple (kernel_size, stride, frac threshold)
-                                detect_params = None #tuple (threshold, min_val, mask_val)
+                                detect_params = None, #tuple (threshold, min_val, mask_val)
+                                blur_sigma = None, # Gaussian blur the detected object
+                                align_cohimgs = False,
                                 ):
             
         self.make_coherent_images(roi_name=roi_name)
@@ -416,6 +435,11 @@ class load_data:
 
         if detect_params is not None:
             self.detect_object(roi_name, *detect_params)
-            
+
+            if blur_sigma is not None:
+                self.blur_detected_objs(roi_name, blur_sigma)
+
+        if align_cohimgs:
+            self.align_coherent_images(roi_name)
         #self.filter_coherent_images(roi_name=roi_name, variance_threshold=variance_threshold)
         
