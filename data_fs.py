@@ -793,3 +793,18 @@ def apply_gaussian_blur(arrays, sigma=1):
     """
     blurred_objects = [gaussian_filter(arr, sigma=sigma) for arr in arrays]
     return blurred_objects
+
+def make_dims_even(size_tuple):
+    """
+    Takes a tuple of (x, y) and ensures both values are even.
+    If a value is odd, it's increased by 1 to make it even.
+    """
+    x, y = size_tuple
+    
+    if x % 2 != 0:
+        x += 1
+        
+    if y % 2 != 0:
+        y += 1
+        
+    return (x, y)

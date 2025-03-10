@@ -10,7 +10,7 @@ def calc_obj_freq_bandwidth(lr_psize):
 
     return omega_obj_x, omega_obj_y
 
-def prepare_dims(images, kout_vec, lr_psize):
+def prepare_dims(images, kout_vec, lr_psize=25, extend = False):
     """
     Prepare the dimensions of the high resolution fourier space image. 
 
@@ -31,8 +31,7 @@ def prepare_dims(images, kout_vec, lr_psize):
     # Object size == Scan length
     Lx, Ly = coh_img_dim[0] * lr_psize, coh_img_dim[1] * lr_psize
 
-    # Object bandwidth 
-    omega_obj_x, omega_obj_y = calc_obj_freq_bandwidth(lr_psize)
+    
 
     # High-resolution Fourier pixel size 
     dkx, dky = 2 * np.pi / Lx, 2 * np.pi / Ly
@@ -42,14 +41,17 @@ def prepare_dims(images, kout_vec, lr_psize):
     kx_min, kx_max = np.min(kx), np.max(kx)
     ky_min, ky_max = np.min(ky), np.max(ky)
 
-    # Extend the range of kx and ky to fit boundary values
-    kx_min_n = kx_min - omega_obj_x
-    kx_max_n = kx_max + omega_obj_x
+    if extend:
+        # Object bandwidth 
+        omega_obj_x, omega_obj_y = calc_obj_freq_bandwidth(lr_psize)
+        # Extend the range of kx and ky to fit boundary values
+        kx_min = kx_min - omega_obj_x
+        kx_max = kx_max + omega_obj_x
+        
+        ky_min = ky_min - omega_obj_y
+        ky_max = ky_max + omega_obj_y
     
-    ky_min_n = ky_min - omega_obj_y
-    ky_max_n = ky_max + omega_obj_y
-    
-    return (kx_min_n,kx_max_n), (ky_min_n,ky_max_n), (dkx,dky)
+    return (kx_min,kx_max), (ky_min,ky_max), (dkx,dky)
 
 def init_hr_image(bounds_x, bounds_y, dks):
 
