@@ -1,5 +1,6 @@
 import numpy as np 
 from numpy.fft import fftshift, ifftshift, fft2, ifft2
+import torch
 
 
 def calc_obj_freq_bandwidth(lr_psize):
@@ -10,7 +11,7 @@ def calc_obj_freq_bandwidth(lr_psize):
 
     return omega_obj_x, omega_obj_y
 
-def prepare_dims(images, kout_vec, lr_psize):
+def prepare_dims(images, kout_vec, lr_psize, extend_to_double):
     """
     Prepare the dimensions of the high resolution fourier space image. 
 
@@ -31,8 +32,7 @@ def prepare_dims(images, kout_vec, lr_psize):
     # Object size == Scan length
     Lx, Ly = coh_img_dim[0] * lr_psize, coh_img_dim[1] * lr_psize
 
-    # Object bandwidth 
-    omega_obj_x, omega_obj_y = calc_obj_freq_bandwidth(lr_psize)
+    
 
     # High-resolution Fourier pixel size 
     dkx, dky = 2 * np.pi / Lx, 2 * np.pi / Ly
@@ -42,14 +42,30 @@ def prepare_dims(images, kout_vec, lr_psize):
     kx_min, kx_max = np.min(kx), np.max(kx)
     ky_min, ky_max = np.min(ky), np.max(ky)
 
-    # Extend the range of kx and ky to fit boundary values
-    kx_min_n = kx_min - omega_obj_x
-    kx_max_n = kx_max + omega_obj_x
     
-    ky_min_n = ky_min - omega_obj_y
-    ky_max_n = ky_max + omega_obj_y
     
-    return (kx_min_n,kx_max_n), (ky_min_n,ky_max_n), (dkx,dky)
+    if extend_to_double:
+        range_x = kx_max - kx_min
+        range_y = ky_max - ky_min
+        
+        kx_min = kx_min - range_x/2
+        kx_max = kx_max + range_x/2
+        
+        ky_min = ky_min - range_y/2
+        ky_max = ky_max + range_y/2
+        
+    else:
+        # Object bandwidth 
+        omega_obj_x, omega_obj_y = calc_obj_freq_bandwidth(lr_psize)
+        # Extend the range of kx and ky to fit boundary values
+        kx_min = kx_min - omega_obj_x
+        kx_max = kx_max + omega_obj_x
+        
+        ky_min = ky_min - omega_obj_y
+        ky_max = ky_max + omega_obj_y
+
+    
+    return (kx_min,kx_max), (ky_min,ky_max), (dkx,dky)
 
 def init_hr_image(bounds_x, bounds_y, dks):
 
@@ -72,3 +88,31 @@ def init_hr_image(bounds_x, bounds_y, dks):
     hr_fourier_image = fftshift(fft2(ifftshift(hr_obj_image)))
 
     return hr_obj_image, hr_fourier_image
+
+
+def mask_torch_ctf(outer_size):
+    """
+    Create a (2N, 2M) array with ones in the center region of size (N, M) and zeros elsewhere.
+    
+    Parameters:
+        outer_size: tuple (2N, 2M) -> total size of the array
+        inner_size: tuple (N, M) -> size of the central region filled with ones
+    
+    Returns:
+        mask: (2N, 2M) torch.Tensor
+    """
+    mask = torch.zeros(outer_size, dtype=torch.float32)
+
+    print(outer_size)
+    print(outer_size[0])
+    
+    # Calculate center indices
+    N, M = outer_size[0]//2, outer_size[1]//2
+    
+    start_x, start_y = (outer_size[0] - N) // 2, (outer_size[1] - M) // 2
+    end_x, end_y = start_x + N, start_y + M
+
+    # Set central region to ones
+    mask[start_x:end_x, start_y:end_y] = 1
+
+    return mask
