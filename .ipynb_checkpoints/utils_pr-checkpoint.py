@@ -103,9 +103,6 @@ def mask_torch_ctf(outer_size):
     """
     mask = torch.zeros(outer_size, dtype=torch.float32)
 
-    print(outer_size)
-    print(outer_size[0])
-    
     # Calculate center indices
     N, M = outer_size[0]//2, outer_size[1]//2
     
