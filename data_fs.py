@@ -16,6 +16,7 @@ from skimage.registration import phase_cross_correlation
 from scipy.ndimage import fourier_shift, gaussian_filter, binary_dilation
 import numpy as np
 import scipy.ndimage as ndimage
+import cv2
 
 import scipy
 import scipy.fft
@@ -808,3 +809,106 @@ def make_dims_even(size_tuple):
         y += 1
         
     return (x, y)
+
+def compute_histograms(image_list, bins=256):
+    """
+    Computes the intensity histogram for each image in a list.
+
+    Args:
+        image_list (list of np.ndarray): List of grayscale images (2D NumPy arrays).
+        bins (int): Number of bins for the histogram (default: 256 for 8-bit images).
+
+    Returns:
+        list of np.ndarray: A list where each element is a histogram array.
+    """
+    histograms = []
+    
+    for img in image_list:
+        # Compute histogram (normalized)
+        maxima = img.max()
+        hist, _ = np.histogram(img.ravel(), bins=bins, range=[0, maxima])
+        histograms.append(hist)
+
+    return histograms
+
+def threshold_data(image_list, threshold_value):
+
+    """
+    threshold the intensity histogram for each image in a list.
+
+    Args:
+        image_list (list of np.ndarray): List of grayscale images (2D NumPy arrays).
+        threshold_value (float):
+
+    Returns:
+        list of np.ndarray: A list where each image is filtered 
+    """
+    filtered_imgs = []
+    
+    for img in image_list:
+        # Compute histogram (normalized)
+        filt_img = np.where(img<threshold_value, 0, img)
+        filtered_imgs.append(filt_img)
+
+    return filtered_imgs
+
+def bilateral_filter(image, sigma_spatial=3, sigma_range=50, kernel_size=7):
+    """
+    Applies bilateral filtering to a 2D grayscale image using OpenCV.
+
+    Args:
+        image (np.ndarray): 2D grayscale image.
+        sigma_spatial (float): Standard deviation for spatial smoothing.
+        sigma_range (float): Standard deviation for intensity (range) smoothing.
+        kernel_size (int): Size of the filter kernel (determines the neighborhood size).
+
+    Returns:
+        np.ndarray: Bilaterally filtered image.
+    """
+
+    # Apply OpenCV bilateral filter
+    filtered_image = cv2.bilateralFilter(image, d=kernel_size, sigmaColor=sigma_range, sigmaSpace=sigma_spatial)
+
+    return filtered_image
+
+def bilateral_filter_parallel(image_list, sigma_spatial=3, sigma_range=50, kernel_size=7, n_jobs=8):
+
+    # Use joblib to parallelize the median filter application
+    padded_images = Parallel(n_jobs=n_jobs)(
+        delayed(pad_to_double)(image, sigma_spatial,sigma_range,kernel_size) for image in image_list)
+    return padded_images
+
+def reorder_pixels_from_center(pixel_coords, connected_array=None):
+    """
+    Reorders a list of pixel coordinates so that the sequence starts at the center
+    and expands outward
+
+    Args:
+        pixel_coords: List of (x, y) pixel coordinates.
+
+    Returns:
+        list of tuples: Reordered pixel coordinates.
+    """
+    pixel_coords = np.array(pixel_coords)
+
+    # Compute the centroid (mean of coordinates)
+    centroid = np.mean(pixel_coords, axis=0)
+
+    # Find the actual pixel closest to the centroid
+    distances = np.linalg.norm(pixel_coords - centroid, axis=1)
+    center_idx = np.argmin(distances)  # Index of the closest pixel
+    center_pixel = pixel_coords[center_idx]
+
+    # Compute distances from the center pixel
+    distances_from_center = np.linalg.norm(pixel_coords - center_pixel, axis=1)
+
+    # Sort pixels by increasing distance
+    sorted_indices = np.argsort(distances_from_center)
+    ordered_pixels = pixel_coords[sorted_indices]
+
+    if connected_array is not None:
+        ordered_array = connected_array[sorted_indices]
+
+        return ordered_pixels.tolist(), ordered_array
+        
+    return ordered_pixels.tolist()

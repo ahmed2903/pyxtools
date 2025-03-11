@@ -338,12 +338,12 @@ def update_live_plot(img_amp, img_phase, hr_obj_image, hr_fourier_obj, fig):
 
     amp_mean = np.mean(amplitude_obj)
     vmin = amp_mean - 0.1 * amp_mean
-    vmax = amp_mean + 0.3 * amp_mean
+    vmax = amp_mean + 2 * amp_mean
     img_amp.set_clim(vmin, vmax)
 
     ft_mean = np.mean(amplitude_ft)
     vmin = ft_mean - 0.1 * ft_mean
-    vmax = ft_mean + 0.3 * ft_mean
+    vmax = ft_mean + 2 * ft_mean
     img_phase.set_clim(vmin, vmax)
     
     clear_output(wait=True)
@@ -496,3 +496,26 @@ def plot_list_slider(img_list, scale_fac=0.3, vmin1 = None, vmax1 = None):
 
     display(interactive_plot)  # Show slider
     #display(fig)  # Display the figure
+
+def plot_pixel_order(ordered_pixels, connection=False):
+    """
+    Plots the pixel coordinates before and after reordering.
+    
+    Args:
+        ordered_pixels (list of tuples): Reordered pixel coordinates.
+    """
+    # Convert lists to NumPy arrays for easy plotting
+    ordered_pixels = np.array(ordered_pixels)
+
+    # Create figure
+    fig, ax = plt.subplots(1,1 ,figsize=(12, 6))
+
+    # Plot original pixel positions (unordered)
+    ax.scatter(ordered_pixels[:, 0], ordered_pixels[:, 1], color='red', label="Pixels")
+    if connection:
+        ax.plot(ordered_pixels[:, 0], ordered_pixels[:, 1], color='red', label="Pixels")
+
+    ax.set_title("Original Pixel Coordinates")
+    ax.invert_yaxis()  # Invert to match image coordinates
+
+    plt.show()

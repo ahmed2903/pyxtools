@@ -18,7 +18,7 @@ import concurrent
 
 from ..data_fs import * 
 from ..xrays_fs import compute_vectors
-from  ..plotting_fs import plot_roi_from_numpy
+from  ..plotting_fs import plot_roi_from_numpy, plot_pixel_space
 
 class load_data:
     
@@ -312,6 +312,10 @@ class load_data:
                                                               threshold=threshold, 
                                                               n_jobs=32)
 
+    def filter_by_bilateral(self, roi_name, sigma_spatial, sigma_range, kernel_size):
+
+        self.coherent_images[roi_name] = bilateral_filter_parallel(self.coherent_images[roi_name], sigma_spatial, sigma_range, kernel_size)
+    
     def blur_detected_objs(self, roi_name, sigma):
 
         self.images_object[roi_name] = apply_gaussian_blur(self.images_object[roi_name], sigma=sigma)
@@ -372,14 +376,58 @@ class load_data:
         
         avg_intensity = np.mean(peak_intensity)
         self.ptychographs[roi_name_op] = self.ptychographs[roi_name_op]/peak_intensity[...,np.newaxis, np.newaxis] * avg_intensity
-        
 
+    def plot_intensity_histograms(self, roi_name, bins = 256):
+
+        histograms = compute_histograms(ls, bins=120)
+
+        num_images = len(histograms)  # Number of images in the list
+        
+        # Create a slider for selecting the image index
+        img_slider = widgets.IntSlider(min=0, max=num_images - 1, value=0, description="Image")
+        
+        # Create figure & axis once
+        fig, ax = plt.subplots(figsize=(6, 6))
+        
+        # Initial image
+        line, = ax.plot(histograms[0])  
+        ax.set_yscale("log")  # Set y-axis to log scale
+        ax.set_title(f"Intensity Histogram {0}/{num_images - 1}")
+        ax.set_ylabel("Log Frequency")
+        plt.tight_layout()
+        
+        def update_image(img_idx):
+            """Updates the displayed image when the slider is moved."""
+            line.set_ydata(histograms[img_idx])  # Update image data
+            
+            ax.set_title(f"Intensity historgram{img_idx}/{num_images - 1}")  # Update title
+            fig.canvas.draw_idle()  # Efficient redraw
+        
+        # Create interactive slider
+        interactive_plot = widgets.interactive(update_image, img_idx=img_slider)
+        
+        display(interactive_plot)  # Show slider
+        #display(fig)  # Display the figure
+    
+    def mask_cohimgs_threshold(self, roi_name, threshold_value):
+        
+        self.coherent_imgs[roi_name] = threshold_data(gold.coherent_imgs[roi_name], threshold_value)
+    
     def mask_region_cohimgs(self, roi_name, region):
         
         sx,ex,sy,ey = region
         self.coherent_imgs[roi_name] = np.array(self.coherent_imgs[roi_name])
         self.coherent_imgs[roi_name][:,sx:ex,sy:ey] = np.median(self.coherent_imgs[roi_name], axis = (1,2))[:,np.newaxis, np.newaxis]
-    
+
+
+    def order_pixels(self, roi_name):
+
+        self.kouts[roi_name], self.coherent_imgs[roi_name] = reorder_pixels_from_center(self.kouts[roi_name], connected_array=self.coherent_imgs[roi_name])
+
+    def plot_pixel_space(self,roi_name, connection=True):
+
+        plot_pixel_space(self.kouts[roi_name], connection=connection)
+        
     def prepare_roi(self, roi_name:str, 
                     mask_val: float, 
                     mask_max_coh:bool = False,
@@ -404,7 +452,7 @@ class load_data:
             self.pool_detector_space(roi_name, *pool_det)
         self.average_frames_roi(roi_name=roi_name)
         self.make_kvector(roi_name=roi_name,mask_val= mask_val)
-
+    
     def align_coherent_images(self, roi_name):
 
         self.coherent_imgs[roi_name] = align_images(self.coherent_imgs[roi_name])
@@ -412,11 +460,14 @@ class load_data:
     def prepare_coherent_images(self, roi_name:str, 
                                 mask_region = None,
                                 variance_threshold = None, 
+                                order_imgs = True,
                                 background_sigma = None, 
                                 median_params = None, # tuple (kernel_size, stride, frac threshold)
+                                bilateral_params = None, # tuple (sigma_spatial, sigma_range, kernel_size)
                                 detect_params = None, #tuple (threshold, min_val, mask_val)
                                 blur_sigma = None, # Gaussian blur the detected object
                                 align_cohimgs = False,
+                                mask_threshold = None
                                 ):
             
         self.make_coherent_images(roi_name=roi_name)
@@ -425,14 +476,21 @@ class load_data:
             
         if variance_threshold is not None:
             self.filter_coherent_images(roi_name=roi_name, variance_threshold=variance_threshold)
-        
+
+        if order_imgs:
+            self.order_pixels(roi_name)
+        if mask_threshold is not None:
+            self.mask_cohimgs_threshold(roi_name=roi_name, threshold_value= mask_threshold)
         if background_sigma is not None:
             self.remove_coh_background(roi_name, background_sigma) 
-    
+        
         self.even_dims_cohimages(roi_name=roi_name)
         if median_params is not None:
             self.filter_by_median(roi_name, *median_params)
 
+        if bilateral_params is not None:
+            self.filter_by_bilateral(roi_name, *bilateral_params)
+            
         if detect_params is not None:
             self.detect_object(roi_name, *detect_params)
 
