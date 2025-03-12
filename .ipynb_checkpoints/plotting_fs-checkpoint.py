@@ -353,7 +353,7 @@ def update_live_plot(img_amp, img_phase, hr_obj_image, hr_fourier_obj, fig):
 def plot_images_side_by_side(image1, image2, 
                              vmin1= None, vmax1=None, 
                              vmin2= None, vmax2=None, 
-                             title1="Image 1", title2="Image 2", cmap1="gray", cmap2="gray", figsize=(10, 5), show = False):
+                             title1="Image 1", title2="Image 2", cmap1="gray", cmap2="gray", figsize=(10, 5), show = False, save_fname = None):
     """
     Plots two images side by side.
 
@@ -400,6 +400,9 @@ def plot_images_side_by_side(image1, image2,
     plt.tight_layout()
     if show:
         plt.show()
+
+    if save_fname is not None:
+        plt.savefig(save_fname)
 
 def two_lists_one_slider(img_list1, img_list2, scale_fac=0.3, vmin1 = None, vmax1 = None, vmin2=None, vmax2=None, cmap1 = 'viridis', cmap2 = 'viridis'):
     """Displays a list of coherent images and allows scrolling through them via a slider."""
@@ -519,3 +522,4 @@ def plot_pixel_order(ordered_pixels, connection=False):
     ax.invert_yaxis()  # Invert to match image coordinates
 
     plt.show()
+

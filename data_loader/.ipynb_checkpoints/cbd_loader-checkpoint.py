@@ -18,7 +18,7 @@ import concurrent
 
 from ..data_fs import * 
 from ..xrays_fs import compute_vectors
-from  ..plotting_fs import plot_roi_from_numpy, plot_pixel_space
+from  ..plotting_fs import plot_roi_from_numpy, plot_pixel_order
 
 class load_data:
     
@@ -191,7 +191,7 @@ class load_data:
         
         display(interactive_plot)  # Display the interactive widget
         
-    def plot_coherent_sequence(self, roi_name: str):
+    def plot_coherent_sequence(self, roi_name: str, scale_factor = .4):
         """Displays a list of coherent images and allows scrolling through them via a slider."""
         
         img_list = self.coherent_imgs[roi_name]  # List of coherent images
@@ -216,7 +216,7 @@ class load_data:
             img = img_list[img_idx]
             img_mean = np.mean(img)
             vmin = img_mean - 0.05 * img_mean
-            vmax = img_mean + 0.2 * img_mean
+            vmax = img_mean + scale_factor * img_mean
             
             im.set_data(img)  # Update image data
             im.set_clim(vmin, vmax)
@@ -422,7 +422,7 @@ class load_data:
 
     def order_pixels(self, roi_name):
 
-        self.kouts[roi_name], self.coherent_imgs[roi_name] = reorder_pixels_from_center(self.kouts[roi_name], connected_array=self.coherent_imgs[roi_name])
+        self.kouts[roi_name], self.coherent_imgs[roi_name] = reorder_pixels_from_center(self.kouts[roi_name], connected_array=np.array(self.coherent_imgs[roi_name]))
 
     def plot_pixel_space(self,roi_name, connection=True):
 
