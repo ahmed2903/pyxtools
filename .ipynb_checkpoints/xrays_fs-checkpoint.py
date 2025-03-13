@@ -6,6 +6,7 @@ from math import sin, cos, pi
 import itertools as it
 from multiprocessing import Pool, cpu_count
 from scipy.optimize import minimize
+from skimage.draw import disk, polygon
 
 from . import utils as ut
 from . import atom_info as af
@@ -28,6 +29,42 @@ def energy2wavelength_a(energy_kev: float) -> float:
     wavelength_a = lam / ut.Ang # in angstroms
 
     return wavelength_a
+
+def wavelength_a2energy(wavelength):
+    """
+    Converts wavelength in A to energy in keV
+     Energy [keV] = h*c/L = 12.3984 / lambda [A]
+    """
+
+    # SI: E = hc/lambda
+    lam = wavelength * ut.Ang
+    E = ut.hplanck * ut.c / lam
+
+    # Electron Volts:
+    Energy = E / ut.echarge
+    return Energy / 1000.0
+
+def qmag2dspace(qmag):
+    """
+    Calculate d-spacing from |Q|
+         dspace = q2dspace(Qmag)
+    """
+    return 2 * np.pi / qmag
+
+
+def dspace2qmag(dspace):
+    """
+    Calculate d-spacing from |Q|
+         Qmag = q2dspace(dspace)
+    """
+    return 2 * np.pi / dspace
+
+def wavevector(energy_kev=None, wavelength=None):
+    """Return wavevector = 2pi/lambda"""
+    if wavelength is None:
+        wavelength = energy2wavelength_a(energy_kev)
+    return 2 * np.pi / wavelength
+
 
 def calc_qmag(twotheta:float, **kwargs):
     """
@@ -83,6 +120,91 @@ def qmag2ttheta(qmag: float, **kwargs) -> float:
 
     return ttheta
 
+def compute_phase_in_batches(q_vec, rj, batch_size=1000):
+    """
+    Compute phase = exp(-1j * dot(q_vec, rj.T)) in batches to save memory.
+
+    Args:
+        q_vec (ndarray): Array of shape (N, 3) containing wavevectors.
+        rj (ndarray): Array of shape (M, 3) containing atomic positions.
+        batch_size (int): Number of rows in q_vec to process at a time.
+
+    Returns:
+        ndarray: Phase matrix of shape (N, M) computed in batches.
+    """
+    N, M = q_vec.shape[0], rj.shape[0]
+    phase = np.zeros((N, M), dtype=np.complex128)  # Allocate output array
+
+    for i in range(0, N, batch_size):
+        batch_end = min(i + batch_size, N)  # Handle last batch correctly
+        q_batch = q_vec[i:batch_end]  # Extract batch
+        phase[i:batch_end] = np.exp(-1j * np.einsum('ij,kj->ik', q_batch, rj))  # Efficient dot product
+
+    return phase
+
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
+def compute_phase_batch(q_batch, rj):
+    """Computes a batch of phase values."""
+    return np.exp(-1j * np.einsum('ij,kj->ik', q_batch, rj))
+
+def compute_phase_multithreaded(q_vec, rj, batch_size=1000, num_threads=4):
+    """
+    Compute phase = exp(-1j * dot(q_vec, rj.T)) using multithreading for large arrays.
+
+    Args:
+        q_vec (ndarray): (N, 3) wavevectors.
+        rj (ndarray): (M, 3) atomic positions.
+        batch_size (int): Number of rows in q_vec to process per batch.
+        num_threads (int): Number of threads to use.
+
+    Returns:
+        ndarray: (N, M) phase matrix computed in parallel.
+    """
+    N = q_vec.shape[0]
+    phase = np.zeros((N, rj.shape[0]), dtype=np.complex128)  # Allocate output
+
+    # Define batch ranges
+    batch_ranges = [(i, min(i + batch_size, N)) for i in range(0, N, batch_size)]
+
+    # Run multithreading
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        results = list(executor.map(lambda b: compute_phase_batch(q_vec[b[0]:b[1]], rj), batch_ranges))
+
+    # # Merge results into phase array
+    # for (start, end), res in zip(batch_ranges, results):
+    #     phase[start:end] = res  # Assign computed batches
+
+    phase = np.concatenate(results)
+    return phase
+
+def compute_phase_parallel(q_vec, rj, batch_size=1000, n_jobs=4):
+    """
+    Compute phase = exp(-1j * dot(q_vec, rj.T)) using joblib for parallel processing.
+
+    Args:
+        q_vec (ndarray): (N, 3) wavevectors.
+        rj (ndarray): (M, 3) atomic positions.
+        batch_size (int): Number of rows in q_vec to process per batch.
+        n_jobs (int): Number of jobs to run in parallel.
+
+    Returns:
+        ndarray: (N, M) phase matrix computed in parallel.
+    """
+    N = q_vec.shape[0]
+
+    # Define batch ranges
+    batch_ranges = [(i, min(i + batch_size, N)) for i in range(0, N, batch_size)]
+
+    # Run parallel processing using joblib
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(compute_phase_batch)(q_vec[start:end], rj) for start, end in batch_ranges
+    )
+
+    # Merge results into a single array
+    phase = np.concatenate(results)
+    return phase
+
 def calculate_atomic_formfactor(atom: str, qvec: np.ndarray, wavelength_a: float):
 
     """
@@ -110,13 +232,17 @@ def calculate_atomic_formfactor(atom: str, qvec: np.ndarray, wavelength_a: float
     inter = Z - 41.78214 * s**2  * ( (a1*np.exp(-b1*s**2)) + a2*np.exp(-b2*s**2) + a3*np.exp(-b3*s**2) +  a4*np.exp(-b4*s**2) ) +c
     return inter
 
-def calculate_form_factor(real_lattice_vecs, q_vec, R_i):
+def calculate_form_factor(real_lattice_vecs, q_vec, R_i, mask_Ri= None):
     
     """
     Input:
         real_lattice_vecs (np.ndarray): 3x3 array containing the real space lattice vectors
         q_vec (np.ndarray): The reciprocal lattice vectors to consider
         R_i (np.ndarray): the real space unit cell positions
+        
+        Optional:
+
+            mask_Ri (np.ndarray): Mask Ris outside the region of interest (for ptycho scan)
         
     Returns: 
         f_q (np.ndarray): the Form factor of the crystal
@@ -128,13 +254,23 @@ def calculate_form_factor(real_lattice_vecs, q_vec, R_i):
     
     # Volume of unit cell
     V_cell = np.dot(real_lattice_vecs[0], np.cross(real_lattice_vecs[1], real_lattice_vecs[2])) 
-    phase = np.exp(-1j*np.dot(q_vec,R_i.T))
-                   
-    f_q = 2*pi * np.sum(phase, axis = -1) / V_cell 
+    
+    if mask_Ri is not None:
+        R_i = R_i * mask_Ri[:,np.newaxis]
+    
+    #phase = np.exp(-1j * np.einsum('ij,kj->ik', q_vec, R_i))
+    phase = compute_phase_parallel(q_vec, R_i, batch_size=10000, n_jobs=8)
+
+    #phase = np.exp(-1j*np.dot(q_vec,R_i.T))
+
+    scattering_strength_coeff = (np.sum(mask_Ri) / mask_Ri.shape[0]) # FIX ME!
+    
+    f_q = 2*pi * np.sum(phase, axis = -1) / V_cell * scattering_strength_coeff
+    
     return f_q
 
+from joblib import Parallel, delayed
 def calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a):
-    
     """
     The structure factor at q_vec, followiung s_q = Sum_{atoms in unit cell} f_j * exp[-1j* q.r_j]
 
@@ -148,24 +284,22 @@ def calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a):
         np.ndarray: Structure factor for every q_vec
     """
     rj = np.array(rj_atoms)
-    
     fjs = []
     for atom in atoms:
         fj = calculate_atomic_formfactor(atom, q_vec, wavelength_a)
         fjs.append(fj)
         
-    
     fjs = np.array(fjs)
+    phase = compute_phase_parallel(q_vec, rj, batch_size=10000, n_jobs=8)
 
-    phase = np.exp(-1j*np.dot(q_vec,rj.T))
+    #phase = np.exp(-1j * np.einsum('ij,kj->ik', q_vec, rj))
+    #phase = np.exp(-1j*np.dot(q_vec,rj.T))
  
     t = fjs.T*phase
     s_q = np.sum(t, axis = -1)
-    
     return s_q
 
-
-def calculate_scattering_amplitude(real_lattice_vecs, q_vec, R_i, atoms, rj_atoms, wavelength_a):
+def calculate_scattering_amplitude(real_lattice_vecs, q_vec, R_i, atoms, rj_atoms, wavelength_a, mask_Ri = None):
     
     """
     Calculates the scattering amplitudes F(q) = S(q) [the structure factor] * f(q) [The form factor]
@@ -181,7 +315,7 @@ def calculate_scattering_amplitude(real_lattice_vecs, q_vec, R_i, atoms, rj_atom
     Returns:
         np.ndarray: the scattering amplitude
     """
-    form_factor = calculate_form_factor(real_lattice_vecs, q_vec, R_i)
+    form_factor = calculate_form_factor(real_lattice_vecs, q_vec, R_i, mask_Ri)
     structure_factor = calculate_structure_factor(atoms, rj_atoms, q_vec, wavelength_a)
     scattering_amp = form_factor*structure_factor
     
@@ -208,7 +342,11 @@ def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
 
     # Generate random directions within the cone defined by the NA
     phi = np.random.uniform(0, 2 * np.pi, num_vectors)  # Random azimuthal angle (0 to 2*pi)
-    theta = np.random.uniform(0, theta_max, num_vectors)  # Random polar angle (0 to theta_max)
+    
+    u = np.random.uniform(0,1, num_vectors)
+    theta = np.acos(1-u*(1-np.cos(theta_max)))
+    
+    #theta = np.random.uniform(0, theta_max, num_vectors)  # Random polar angle (0 to theta_max)
 
     # Convert spherical coordinates to Cartesian coordinates for the k-vectors
     k_vectors = np.zeros((num_vectors, 3))
@@ -223,21 +361,19 @@ def convergent_kins(wavelength, NA, focal_length, num_vectors=100):
 
     # Converging effect: adjust directions to point towards the focal point
     # For simplicity, let's assume the focal point lies along the z-axis and the beam converges to (0, 0, focal_length)
-    # The beam is converging toward (0, 0, focal_length)
-    focal_point = np.array([0, 0, focal_length])
+    # # The beam is converging toward (0, 0, focal_length)
+    # focal_point = np.array([0, 0, focal_length])
 
-    # Normalize each vector to point towards the focal point
-    for i in range(num_vectors):
-        # Direction vector from the k-vector's point to the focal point
-        direction_to_focus = focal_point - k_vectors[i]
-        # Normalize this direction
-        direction_to_focus /= np.linalg.norm(direction_to_focus)
-        # Update k-vector direction (the normalized vector)
-        k_vectors[i] = direction_to_focus * k_magnitude
+    # # Normalize each vector to point towards the focal point
+    # for i in range(num_vectors):
+    #     # Direction vector from the k-vector's point to the focal point
+    #     direction_to_focus = focal_point - k_vectors[i]
+    #     # Normalize this direction
+    #     direction_to_focus /= np.linalg.norm(direction_to_focus)
+    #     # Update k-vector direction (the normalized vector)
+    #     k_vectors[i] = direction_to_focus * k_magnitude
 
     return k_vectors
-
-
 
 def crystal_to_detector_pixels_vector(detector_distance, pixel_size, detector_size, wavelength):
     
@@ -312,8 +448,6 @@ def gen_qvectors_from_kins_kouts(kins, kouts):
     
     return difference_vectors, k_out, k_in
 
-
-
 def generate_detector_image(intensities, kouts, detector_size, pixel_size, distance):
     """
     Generate a 2D detector image based on scattering intensities and kouts, accounting for distance R.
@@ -336,43 +470,14 @@ def generate_detector_image(intensities, kouts, detector_size, pixel_size, dista
 
     detector_image = np.zeros((nx,ny))
 
-    # Populate the image array with intensities
-    for i in range(len(intensities)):
-        detector_image[indices[i,0], indices[i,1]] += intensities[i]
+
+    np.add.at(detector_image, (indices[:,0], indices[:,1]), intensities)
+    
+    ## Populate the image array with intensities
+    #for i in range(len(intensities)):
+    #    detector_image[indices[i,0], indices[i,1]] += intensities[i]
 
     return detector_image
-
-def reverse_kins_to_pixels(kins, pixel_size, detector_distance, detector_shape):
-    """
-    Reverse map k_out vectors to detector pixel indices.
-
-    Args:
-        kouts (np.ndarray): Array of k_out vectors (N, 3), normalized.
-        pixel_size (float): Pixel size in micrometers.
-        detector_distance (float): Distance from the crystal to the center of the detector in meters.
-        detector_shape: Tuple (num_rows, num_cols) of the detector
-    Returns:
-        np.ndarray: Array of pixel indices for k_out vectors.
-    """
-
-    cen_x,cen_y = np.array(detector_shape)/2
-    
-    # pixel size in meters
-    pixel_size = np.array(pixel_size)
-    kins = kins / np.linalg.norm(kins, axis=1)[:, np.newaxis]
-    
-    # Reverse mapping to pixel indices
-    x_pixels = (kins[:, 0] / kins[:, 2]) * detector_distance / pixel_size + cen_x
-    y_pixels = (kins[:, 1] / kins[:, 2]) * detector_distance / pixel_size + cen_y
-    
-    # Convert to integer pixel indices
-    x_pixel_indices = np.floor(x_pixels).astype(int)
-    y_pixel_indices = np.floor(y_pixels).astype(int)
-
-    coord = np.vstack((x_pixel_indices, y_pixel_indices)).T
-    print(coord.shape)
-    
-    return coor
 
 def calc_ttheta_from_kout(kouts, kin_avg):
 
@@ -431,7 +536,7 @@ def reverse_kins_to_pixels(kins, pixel_size, detector_distance, central_pixel):
     Args:
         kouts (np.ndarray): Array of k_out vectors (N, 3), normalized.
         pixel_size (float): Pixel size in micrometers.
-        detector_distance (float): Distance from the crystal to the center of the detector in meters.
+        detector_distance (float): Distance from the crystal to the center of the detector in micro meters.
         detector_shape: Tuple (num_rows, num_cols) of the detector
     Returns:
         np.ndarray: Array of pixel indices for k_out vectors.
@@ -495,7 +600,110 @@ def compute_vectors(coordinates, detector_distance, pixel_size, central_pixel, w
 
     return ks
     
+def reverse_kouts_to_pixels(kouts, intensiies, detector_size, pixel_size, detector_distance):
+    """
+    Reverse map k_out vectors to detector pixel indices.
 
+    Args:
+        kouts (np.ndarray): Array of k_out vectors (N, 3), normalized.
+        detector_size (tuple): Detector dimensions in meters (width, height).
+        pixel_size (tuple): Pixel size in micrometers (width, height).
+        detector_distance (float): Distance from the crystal to the center of the detector in meters.
+
+    Returns:
+        np.ndarray: Array of pixel indices for k_out vectors.
+    """
+    
+    # Convert pixel size to meters
+    pixel_size = np.array(pixel_size) * 1e-6
+    
+    # Compute number of pixels in each dimension
+    nx, ny = (detector_size / pixel_size).astype(int)
+
+    # Reverse mapping to pixel indices
+    x_pixels = (kouts[:, 0] / kouts[:, 2]) * detector_distance / pixel_size[0] + nx / 2
+    y_pixels = (kouts[:, 1] / kouts[:, 2]) * detector_distance / pixel_size[1] + ny / 2
+
+    # Convert to integer pixel indices using rounding
+    x_pixel_indices = np.floor(x_pixels).astype(int)
+    y_pixel_indices = np.floor(y_pixels).astype(int)
+
+    # Verify indices are within bounds
+    in_bounds_mask = (x_pixel_indices >= 0) & (x_pixel_indices < nx) & \
+                (y_pixel_indices >= 0) & (y_pixel_indices < ny)
+
+    
+    x_pixel_indices = x_pixel_indices[in_bounds_mask]
+    y_pixel_indices = y_pixel_indices[in_bounds_mask]
+
+    intensiies = intensiies[in_bounds_mask]
+
+    return np.vstack((y_pixel_indices, x_pixel_indices)).T, intensiies
+
+from scipy.spatial.transform import Rotation as R
+def generate_spherical_cap(kout, kin, max_angle_deg, num_samples):
+    """
+    Generate a set of rotated kout vectors forming a spherical cap.
+    
+    kout: The initial kout vector
+    kin: The incident wavevector
+    max_angle_deg: Maximum deflection angle from the central kout (defines the spherical cap size)
+    num_samples: Number of rotations to generate points on the cap
+
+    Returns:
+    - rotated_kouts: An array of kout vectors spanning a spherical cap
+    """
+    max_angle_rad = np.radians(max_angle_deg)
+
+    # Generate small-angle rotations in θ (polar) and φ (azimuthal)
+    theta_vals = np.linspace(0, max_angle_rad, num_samples)  # Polar angles
+    phi_vals = np.linspace(0, 2 * np.pi, num_samples)  # Azimuthal angles
+
+    rotated_kouts = []
+    
+    for theta in theta_vals:
+        for phi in phi_vals:
+            # Euler rotation matrix for the spherical cap
+            euler_angles = [theta, phi, 0]  # (ZXZ convention or other suitable convention)
+            rot_matrix = R.from_euler('ZXZ', euler_angles).as_matrix()
+
+            # Rotate kout
+            kout_rotated = rot_matrix @ kout.T
+            rotated_kouts.append(kout_rotated)
+
+    return np.array(rotated_kouts)
+
+from scipy.interpolate import RegularGridInterpolator
+def extract_scattering_amplitude(rotated_kouts, kin, rlvs_high_res, scat_amp_full):
+    """
+    Interpolates scattering amplitude values from precomputed data.
+    """
+    q_vectors = rotated_kouts - kin  # Compute q = kout - kin
+    sort_idx = np.lexsort((rlvs_high_res[:, 2], rlvs_high_res[:, 1], rlvs_high_res[:, 0]))
+    rlvs_high_res = rlvs_high_res[sort_idx]
+    # Interpolation function for efficient lookup
+    interp_func = RegularGridInterpolator(
+        (rlvs_high_res[:, 0], rlvs_high_res[:, 1], rlvs_high_res[:, 2]),
+        scat_amp_full,
+        method="linear",
+        bounds_error=False,
+        fill_value=0
+    )
+
+    return interp_func(q_vectors)
+
+def compute_image_for_kin(kin, pf, crystal, detector, max_angle_deg, num_samples, rlvs_high_res, scat_amp_full):
+    """ Compute detector image for one kin vector using a spherical cap. """
+    kout = crystal.gvectors + kin  # Central kout
+    rotated_kouts = generate_spherical_cap(kout, kin, max_angle_deg, num_samples)
+
+    # Extract scattering amplitude from precomputed data
+    scat_amp = pf * extract_scattering_amplitude(rotated_kouts, kin, rlvs_high_res, scat_amp_full)
+
+    # Generate detector image
+    image = generate_detector_image(np.abs(scat_amp), rotated_kouts, detector.size, detector.pixel_size, detector.distance)
+    
+    return image
 
 # Rotation matrix from Euler angles
 def rotation_matrix(alpha, beta, gamma):
@@ -592,3 +800,369 @@ def compute_kout_from_G_kin(G_arr, kin_arr):
     return k_out, kin_indices, Garr_indices
 
 
+
+
+
+
+
+#################################### Amplitude and Aberration Profiles for k_ins ####################################
+
+def apply_aberattions_to_kins(kins, amplitude_profile=None, phase_aberration=None):
+    """
+    Generate incoming k-vectors for a convergent beam, including pupil function effects.
+
+    Parameters:
+    - kins: the kin vector 
+    - amplitude_profile: Function describing the amplitude distribution across the pupil.
+                         Takes (kx_norm, ky_norm) as input and returns amplitude.
+    - phase_aberration: Function describing the phase aberrations across the pupil.
+                        Takes (kx_norm, ky_norm) as input and returns phase (in radians).
+
+    Returns:
+    - k_vectors: Array of shape (num_vectors, 3) with each row as a k-vector.
+    - weights: Array of shape (num_vectors,) with amplitude and phase weights for each k-vector.
+    """
+    
+    kx = kins[:,0]
+    ky = kins[:,1]
+
+    # Initialize weights (amplitude and phase)
+    weights = np.ones(kins.shape[0], dtype=complex)
+
+    # Apply amplitude profile if provided
+    if amplitude_profile is not None:
+        weights *= amplitude_profile(kx, ky)
+
+    # Apply phase aberrations if provided
+    if phase_aberration is not None:
+        phase = phase_aberration(kx, ky)
+        weights *= np.exp(1j * phase)  # Multiply by complex phase factor
+
+    # Combine k-vectors and weights
+    return kins, weights
+    
+# Phase Aberrations:
+def defocus_aberration(kx, ky, defocus_coeff):
+    """
+    Defocus aberration: quadratic phase error.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - defocus_coeff: Coefficient controlling the strength of defocus.
+    
+    Returns:
+    - Phase error (in radians).
+    """
+    return defocus_coeff * (kx**2 + ky**2)
+
+def spherical_aberration(kx, ky, spherical_coeff):
+    """
+    Spherical aberration: quartic phase error.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - spherical_coeff: Coefficient controlling the strength of spherical aberration.
+    
+    Returns:
+    - Phase error (in radians).
+    """
+    return spherical_coeff * (kx**2 + ky**2)**2
+
+def coma_aberration(kx, ky, coma_coeff):
+    """
+    Coma aberration: linear in one direction, quadratic in the other.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - coma_coeff: Coefficient controlling the strength of coma.
+    
+    Returns:
+    - Phase error (in radians).
+    """
+    return coma_coeff * kx * (kx**2 + ky**2)
+
+def astigmatism_aberration(kx, ky, astigmatism_coeff):
+    """
+    Astigmatism aberration: quadratic phase error with asymmetry.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - astigmatism_coeff: Coefficient controlling the strength of astigmatism.
+    
+    Returns:
+    - Phase error (in radians).
+    """
+    return astigmatism_coeff * ( kx * ky )
+
+def random_error_profile(kx, ky, amplitude=0.1):
+    """
+    Random layer placement error.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - amplitude: Amplitude of the random error.
+    
+    Returns:
+    - Random phase error (in radians).
+    """
+    return amplitude * np.random.normal(size=kx.shape)
+
+def combined_aberrations(kx, ky, coefficients):
+    """
+    Combine multiple aberrations.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - coefficients: Dictionary of aberration coefficients.
+    
+    Returns:
+    - Total phase error (in radians).
+    """
+    phase_error = 0.0
+    phase_error += defocus_aberration(kx, ky, coefficients['defocus'])
+    phase_error += spherical_aberration(kx, ky, coefficients['spherical'])
+    phase_error += coma_aberration(kx, ky, coefficients['coma'])
+    phase_error += astigmatism_aberration(kx, ky, coefficients['astigmatism'])
+    return phase_error
+    
+# Amplitude Profiles 
+def uniform_amplitude(kx, ky):
+    """
+    Uniform amplitude profile: constant intensity across the lens.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    
+    Returns:
+    - Amplitude (constant value of 1).
+    """
+    return np.ones_like(kx)
+
+def gaussian_amplitude(kx, ky, sigma=0.5):
+    """
+    Gaussian amplitude profile: smooth falloff in intensity.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - sigma: Width of the Gaussian profile.
+    
+    Returns:
+    - Amplitude (Gaussian distribution).
+    """
+    return np.exp(-(kx**2 + ky**2) / (2 * sigma**2))
+
+def top_hat_amplitude(kx, ky, radius=1.0):
+    """
+    Top-hat amplitude profile: sharp cutoff at the edges.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - radius: Radius of the lens aperture.
+    
+    Returns:
+    - Amplitude (1 inside the aperture, 0 outside).
+    """
+    r = np.sqrt(kx**2 + ky**2)
+    return np.where(r <= radius, 1.0, 0.0)
+
+
+def apodized_amplitude(kx, ky, sigma=0.5):
+    """
+    Apodized amplitude profile: smooth tapering at the edges.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - sigma: Width of the apodization profile.
+    
+    Returns:
+    - Amplitude (apodized distribution).
+    """
+    r = np.sqrt(kx**2 + ky**2)
+    return np.exp(-(r**2) / (2 * sigma**2)) * (1 - r**2)
+
+def ring_amplitude(kx, ky, radius=0.7, width=0.1):
+    """
+    Ring-shaped amplitude profile: intensity concentrated in a ring.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - radius: Radius of the ring.
+    - width: Width of the ring.
+    
+    Returns:
+    - Amplitude (ring-shaped distribution).
+    """
+    r = np.sqrt(kx**2 + ky**2)
+    return np.exp(-((r - radius)**2) / (2 * width**2))
+
+def absorption_amplitude(kx, ky, absorption_coeff=0.1):
+    """
+    Absorption-based amplitude profile: gradual decrease in intensity due to material absorption.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - absorption_coeff: Absorption coefficient.
+    
+    Returns:
+    - Amplitude (absorption-based distribution).
+    """
+    r = np.sqrt(kx**2 + ky**2)
+    return np.exp(-absorption_coeff * r)
+
+
+def combined_amplitude(kx, ky, profiles):
+    """
+    Combine multiple amplitude profiles.
+    
+    Parameters:
+    - kx, ky: Transverse k-vector components (normalized to pupil coordinates).
+    - profiles: List of amplitude profile functions.
+    
+    Returns:
+    - Combined amplitude profile.
+    """
+    amplitude = 1.0
+    for profile in profiles:
+        amplitude *= profile(kx, ky)
+    return amplitude
+
+################## Functions for simulation fourier ptychography experiment #########################
+
+def create_shape(shape_type, size):
+    """Generates different shapes as binary masks."""
+    shape_mask = np.zeros((size, size))
+    center = (size // 2, size // 2)
+    if shape_type == "triangle":
+        r = np.array([size * 0.2, size * 0.8, size * 0.8])
+        c = np.array([size * 0.5, size * 0.2, size * 0.8])
+        rr, cc = polygon(r, c)
+        shape_mask[rr, cc] = 1
+
+    elif shape_type == "circle":
+        rr, cc = disk(center, size//2, shape=shape_mask.shape)
+        shape_mask[rr, cc] = 1
+    
+    elif shape_type == "square":
+        shape_mask[size//4:3*size//4, size//4:3*size//4] = 1
+    
+    return shape_mask
+
+def generate_periodic_lattice(N, M, a, b, alpha, shape_type=None, shape_size=5):
+    """Generates a 2D periodic lattice with given parameters and inserts a shape at each lattice point."""
+    total_size = N + 2 * M
+    lattice = np.zeros((total_size, total_size))
+    
+    # Convert alpha to radians
+    alpha_rad = np.radians(alpha)
+    
+    if shape_type:
+        shape = create_shape(shape_type, shape_size)
+    else:
+        shape = None
+    
+    # Generate lattice points within the N x N region, shifted by M for padding
+    for i in range(int(N/a) + 1):
+        for j in range(int(N/b) + 1):
+            x = int(i * a + j * b * np.cos(alpha_rad)) + M
+            y = int(j * b * np.sin(alpha_rad)) + M
+            
+            if 0 <= x < total_size and 0 <= y < total_size:
+                if shape is None:
+                    lattice[y, x] = 1
+                else:
+                    sx, sy = shape.shape
+                    x_start, x_end = max(0, x - sx // 2), min(total_size, x + sx // 2)
+                    y_start, y_end = max(0, y - sy // 2), min(total_size, y + sy // 2)
+                    lattice[y_start:y_end, x_start:x_end] = np.maximum(
+                        lattice[y_start:y_end, x_start:x_end], shape[:y_end - y_start, :x_end - x_start]
+                    )
+    
+    return lattice
+
+def generate_phase_profile(size, phase_type="gradient", phase_max=np.pi, period = 4):
+    """Generates a phase profile of the given size."""
+    x, y = np.meshgrid(np.linspace(-1, 1, size), np.linspace(-1, 1, size))
+    
+    if phase_type == "gradient":
+        phase_profile = phase_max * x  # Linear gradient in the x-direction
+    elif phase_type == "gaussian":
+        phase_profile = phase_max * np.exp(-(x**2 + y**2) / 0.5)  # Gaussian phase profile
+    elif phase_type == "random":
+        phase_profile = np.random.uniform(0, phase_max, (size, size))  # Random phase
+    elif phase_type == "sinusoidal":
+        phase_profile = phase_max/2 * (np.sin(period * np.pi * x) + np.sin(period*np.pi*y))
+    else:
+        raise ValueError("Unsupported phase type")
+    
+    return phase_profile
+    
+def generate_beam_profile(size, profile='gaussian', sigma=5):
+    """Generates a beam profile with different shapes."""
+    x = np.linspace(-size//2, size//2, size)
+    y = np.linspace(-size//2, size//2, size)
+    X, Y = np.meshgrid(x, y)
+    
+    if profile == 'gaussian':
+        beam = np.exp(-(X**2 + Y**2) / (2 * sigma**2))
+    elif profile == 'flat':
+        beam = np.ones((size, size))
+    else:
+        raise ValueError("Unsupported beam profile")
+    
+    return beam
+
+def generate_scan_positions(N, step):
+    """Generates a scan grid over the lattice."""
+    positions = [(x, y) for x in range(0, N - step, step) for y in range(0, N - step, step)]
+    return positions
+
+def simulate_exit_wave(lattice, beam, scan_positions):
+    """Simulates the exit wave for different scan positions."""
+    beam_size = beam.shape[0]
+    lattice_size = lattice.shape[0]
+    exit_waves = []
+    
+    for (x, y) in scan_positions:
+        x_start, x_end = x, x + beam_size
+        y_start, y_end = y, y + beam_size
+        
+        if x_end <= lattice_size and y_end <= lattice_size:
+            exit_wave = lattice[y_start:y_end, x_start:x_end] * beam
+            exit_waves.append(exit_wave)
+    
+    return exit_waves
+
+def simulate_diff_pattern(exit_waves):
+
+    diff_patterns = []
+    for exit_wave in exit_waves:
+
+        exit_wave = np.pad(exit_wave, (exit_wave.shape[0], exit_wave.shape[1]), constant_values=0 )
+        fft_exit_wave = np.fft.ifftshift(np.fft.fft2(np.fft.fftshift(exit_wave)))
+        diff_pattern = np.abs(fft_exit_wave)
+        diff_patterns.append(diff_pattern)
+
+    return diff_patterns
+
+def generate_led_positions(x_range, y_range, x_spacing, y_spacing):
+    """
+    Generates a mesh grid of LED positions on a plane.
+
+    Args:
+        x_range (tuple): Range of x-coordinates (x_min, x_max).
+        y_range (tuple): Range of y-coordinates (y_min, y_max).
+        x_spacing (float): Spacing between LEDs in the x-direction.
+        y_spacing (float): Spacing between LEDs in the y-direction.
+
+    Returns:
+        kx (numpy.ndarray): 2D array of x-coordinates (kx values).
+        ky (numpy.ndarray): 2D array of y-coordinates (ky values).
+    """
+    # Generate 1D arrays for x and y positions
+    x_positions = np.arange(x_range[0], x_range[1] + x_spacing, x_spacing)
+    y_positions = np.arange(y_range[0], y_range[1] + y_spacing, y_spacing)
+
+    # Create a mesh grid
+    kx, ky = np.meshgrid(x_positions, y_positions, indexing="xy")
+
+    return kx, ky

@@ -337,7 +337,7 @@ def update_live_plot(img_amp, img_phase, hr_obj_image, hr_fourier_obj, fig):
     img_phase.set_data(amplitude_ft)
 
     amp_mean = np.mean(amplitude_obj)
-    vmin = amp_mean - 0.1 * amp_mean
+    vmin = max(amp_mean - 0.1 * amp_mean, 0)
     vmax = amp_mean + 2 * amp_mean
     img_amp.set_clim(vmin, vmax)
 
@@ -438,10 +438,10 @@ def two_lists_one_slider(img_list1, img_list2, scale_fac=0.3, vmin1 = None, vmax
         img2 = img_list2[img_idx]
         img_mean2 = np.mean(img2)
         
-        vmin1 = min(img_mean1 - scale_fac * img_mean1, 0)
+        vmin1 = max(img_mean1 - scale_fac * img_mean1, 0)
         vmax1 = img_mean1 + scale_fac * img_mean1
 
-        vmin2 = min(img_mean2 - scale_fac * img_mean2, 0)
+        vmin2 = img_mean2 - scale_fac * img_mean2
         vmax2 = img_mean2 + scale_fac * img_mean2
         
         im1.set_data(img1)  # Update image data
@@ -484,7 +484,7 @@ def plot_list_slider(img_list, scale_fac=0.3, vmin1 = None, vmax1 = None):
         img = img_list[img_idx]
         img_mean = np.mean(img)
 
-        vmin1 = img_mean - scale_fac * img_mean
+        vmin1 = max(img_mean - scale_fac * img_mean,0)
         
         vmax1 = img_mean + scale_fac * img_mean
         

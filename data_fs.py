@@ -62,8 +62,14 @@ def list_datafiles(data_folder):
                 
     return f_names
 
-
-
+def average_data_old(file_path,roi):
+        
+    with h5py.File(file_path,'r') as f:
+        
+        data = np.mean(f['/entry/data/data'][:,roi[0]:roi[1], roi[2]:roi[3]], axis = 0)
+        
+    return data
+    
 def average_data(data_folder, names_array, roi, conc=False):
     
     """
@@ -155,6 +161,48 @@ def stack_4d_data(data_folder,names_array,roi, slow_axis = 0, conc = False):
     if slow_axis == 0: 
 
         stacked_data = np.transpose(stacked_data, (1,0,2,3))
+    
+    return stacked_data
+def print_hdf5_keys(file_path):
+    """
+    Prints all keys (groups and datasets) in an HDF5 file.
+
+    Args:
+        file_path (str): Path to the HDF5 file.
+    """
+    def print_keys(name, obj):
+        """
+        Recursive function to print keys in the HDF5 file.
+        """
+        print(name)  # Print the key (group or dataset name)
+
+    # Open the HDF5 file
+    with h5py.File(file_path, "r") as f:
+        # Traverse the file and print all keys
+        print(f"Keys in {file_path}:")
+        f.visititems(print_keys)
+        
+def stack_4d_data_old(file_path,roi, fast_axis_steps, slow_axis = 0):
+
+    
+    nx = roi[1] - roi[0] # roi vertical size
+    ny = roi[3] - roi[2] # roi horizontal size
+        
+    # Open the input HDF5 file
+    with h5py.File(file_path, "r") as f:
+        # Assume the dataset is named 'data' (change this if needed)
+        if "entry/data/data" not in f:
+            raise ValueError("The input file does not contain a dataset named 'data'.")
+
+        # Load the dataset
+        data = f["entry/data/data"][:,roi[0]:roi[1],roi[2]:roi[3]]  # Load the entire dataset into memory
+        dims = data.shape
+        slow_axis_steps = dims[0]//fast_axis_steps
+        data = data.reshape(slow_axis_steps,fast_axis_steps,dims[1],dims[2])
+    
+    if slow_axis == 0: 
+
+        stacked_data = np.transpose(data, (1,0,2,3))
     
     return stacked_data
 

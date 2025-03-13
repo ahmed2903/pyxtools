@@ -6,6 +6,7 @@ from math import sin, cos, pi
 import itertools as it
 from multiprocessing import Pool, cpu_count
 from scipy.optimize import minimize
+from skimage.draw import disk, polygon
 
 from . import utils as ut
 from . import atom_info as af
@@ -799,6 +800,13 @@ def compute_kout_from_G_kin(G_arr, kin_arr):
     return k_out, kin_indices, Garr_indices
 
 
+
+
+
+
+
+#################################### Amplitude and Aberration Profiles for k_ins ####################################
+
 def apply_aberattions_to_kins(kins, amplitude_profile=None, phase_aberration=None):
     """
     Generate incoming k-vectors for a convergent beam, including pupil function effects.
@@ -832,7 +840,7 @@ def apply_aberattions_to_kins(kins, amplitude_profile=None, phase_aberration=Non
 
     # Combine k-vectors and weights
     return kins, weights
-
+    
 # Phase Aberrations:
 def defocus_aberration(kx, ky, defocus_coeff):
     """
@@ -916,9 +924,8 @@ def combined_aberrations(kx, ky, coefficients):
     phase_error += coma_aberration(kx, ky, coefficients['coma'])
     phase_error += astigmatism_aberration(kx, ky, coefficients['astigmatism'])
     return phase_error
-
-
-#Amplitude Profiles
+    
+# Amplitude Profiles 
 def uniform_amplitude(kx, ky):
     """
     Uniform amplitude profile: constant intensity across the lens.
@@ -1018,3 +1025,144 @@ def combined_amplitude(kx, ky, profiles):
     for profile in profiles:
         amplitude *= profile(kx, ky)
     return amplitude
+
+################## Functions for simulation fourier ptychography experiment #########################
+
+def create_shape(shape_type, size):
+    """Generates different shapes as binary masks."""
+    shape_mask = np.zeros((size, size))
+    center = (size // 2, size // 2)
+    if shape_type == "triangle":
+        r = np.array([size * 0.2, size * 0.8, size * 0.8])
+        c = np.array([size * 0.5, size * 0.2, size * 0.8])
+        rr, cc = polygon(r, c)
+        shape_mask[rr, cc] = 1
+
+    elif shape_type == "circle":
+        rr, cc = disk(center, size//2, shape=shape_mask.shape)
+        shape_mask[rr, cc] = 1
+    
+    elif shape_type == "square":
+        shape_mask[size//4:3*size//4, size//4:3*size//4] = 1
+    
+    return shape_mask
+
+def generate_periodic_lattice(N, M, a, b, alpha, shape_type=None, shape_size=5):
+    """Generates a 2D periodic lattice with given parameters and inserts a shape at each lattice point."""
+    total_size = N + 2 * M
+    lattice = np.zeros((total_size, total_size))
+    
+    # Convert alpha to radians
+    alpha_rad = np.radians(alpha)
+    
+    if shape_type:
+        shape = create_shape(shape_type, shape_size)
+    else:
+        shape = None
+    
+    # Generate lattice points within the N x N region, shifted by M for padding
+    for i in range(int(N/a) + 1):
+        for j in range(int(N/b) + 1):
+            x = int(i * a + j * b * np.cos(alpha_rad)) + M
+            y = int(j * b * np.sin(alpha_rad)) + M
+            
+            if 0 <= x < total_size and 0 <= y < total_size:
+                if shape is None:
+                    lattice[y, x] = 1
+                else:
+                    sx, sy = shape.shape
+                    x_start, x_end = max(0, x - sx // 2), min(total_size, x + sx // 2)
+                    y_start, y_end = max(0, y - sy // 2), min(total_size, y + sy // 2)
+                    lattice[y_start:y_end, x_start:x_end] = np.maximum(
+                        lattice[y_start:y_end, x_start:x_end], shape[:y_end - y_start, :x_end - x_start]
+                    )
+    
+    return lattice
+
+def generate_phase_profile(size, phase_type="gradient", phase_max=np.pi, period = 4):
+    """Generates a phase profile of the given size."""
+    x, y = np.meshgrid(np.linspace(-1, 1, size), np.linspace(-1, 1, size))
+    
+    if phase_type == "gradient":
+        phase_profile = phase_max * x  # Linear gradient in the x-direction
+    elif phase_type == "gaussian":
+        phase_profile = phase_max * np.exp(-(x**2 + y**2) / 0.5)  # Gaussian phase profile
+    elif phase_type == "random":
+        phase_profile = np.random.uniform(0, phase_max, (size, size))  # Random phase
+    elif phase_type == "sinusoidal":
+        phase_profile = phase_max/2 * (np.sin(period * np.pi * x) + np.sin(period*np.pi*y))
+    else:
+        raise ValueError("Unsupported phase type")
+    
+    return phase_profile
+    
+def generate_beam_profile(size, profile='gaussian', sigma=5):
+    """Generates a beam profile with different shapes."""
+    x = np.linspace(-size//2, size//2, size)
+    y = np.linspace(-size//2, size//2, size)
+    X, Y = np.meshgrid(x, y)
+    
+    if profile == 'gaussian':
+        beam = np.exp(-(X**2 + Y**2) / (2 * sigma**2))
+    elif profile == 'flat':
+        beam = np.ones((size, size))
+    else:
+        raise ValueError("Unsupported beam profile")
+    
+    return beam
+
+def generate_scan_positions(N, step):
+    """Generates a scan grid over the lattice."""
+    positions = [(x, y) for x in range(0, N - step, step) for y in range(0, N - step, step)]
+    return positions
+
+def simulate_exit_wave(lattice, beam, scan_positions):
+    """Simulates the exit wave for different scan positions."""
+    beam_size = beam.shape[0]
+    lattice_size = lattice.shape[0]
+    exit_waves = []
+    
+    for (x, y) in scan_positions:
+        x_start, x_end = x, x + beam_size
+        y_start, y_end = y, y + beam_size
+        
+        if x_end <= lattice_size and y_end <= lattice_size:
+            exit_wave = lattice[y_start:y_end, x_start:x_end] * beam
+            exit_waves.append(exit_wave)
+    
+    return exit_waves
+
+def simulate_diff_pattern(exit_waves):
+
+    diff_patterns = []
+    for exit_wave in exit_waves:
+
+        exit_wave = np.pad(exit_wave, (exit_wave.shape[0], exit_wave.shape[1]), constant_values=0 )
+        fft_exit_wave = np.fft.ifftshift(np.fft.fft2(np.fft.fftshift(exit_wave)))
+        diff_pattern = np.abs(fft_exit_wave)
+        diff_patterns.append(diff_pattern)
+
+    return diff_patterns
+
+def generate_led_positions(x_range, y_range, x_spacing, y_spacing):
+    """
+    Generates a mesh grid of LED positions on a plane.
+
+    Args:
+        x_range (tuple): Range of x-coordinates (x_min, x_max).
+        y_range (tuple): Range of y-coordinates (y_min, y_max).
+        x_spacing (float): Spacing between LEDs in the x-direction.
+        y_spacing (float): Spacing between LEDs in the y-direction.
+
+    Returns:
+        kx (numpy.ndarray): 2D array of x-coordinates (kx values).
+        ky (numpy.ndarray): 2D array of y-coordinates (ky values).
+    """
+    # Generate 1D arrays for x and y positions
+    x_positions = np.arange(x_range[0], x_range[1] + x_spacing, x_spacing)
+    y_positions = np.arange(y_range[0], y_range[1] + y_spacing, y_spacing)
+
+    # Create a mesh grid
+    kx, ky = np.meshgrid(x_positions, y_positions, indexing="xy")
+
+    return kx, ky

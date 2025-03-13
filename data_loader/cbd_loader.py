@@ -26,15 +26,22 @@ class load_data:
                  
                  det_psize:float, det_distance:float, 
                  centre_pixel:tuple[int], wavelength:float, 
-                 slow_axis:int):
+                 slow_axis:int, 
+                beamtime='new',
+                fast_axis_steps = None):
         
         self.det_psize = det_psize
         self.det_distance = det_distance
         self.centre_pixel = centre_pixel
         self.wavelength = wavelength 
         self.slow_axis = slow_axis
+        self.beamtime = beamtime
+        self.fast_axis_steps = fast_axis_steps
+
         
         self.dir = f"{directory.rstrip('/')}/Scan_{scan_num}/" 
+        if self.beamtime == 'old':
+            self.dir = f"{self.dir.rstrip('/')}/Scan_{scan_num}_data_000001.h5"
         self.scan_num = scan_num
         self.rois_dict = {}
         self.ptychographs = {}
@@ -43,8 +50,9 @@ class load_data:
         self.coords = {}
         self.kouts = {}
         self.coherent_imgs = {}
-
-        self.fnames = list_datafiles(self.dir)[:-2]        
+        
+        if self.beamtime == 'new':
+            self.fnames = list_datafiles(self.dir)[:-2]        
         
 
     def make_4d_dataset(self, roi_name: str, mask_max_coh=False, mask_min_coh= False):
@@ -52,7 +60,13 @@ class load_data:
         """
         Makes the 4D data set around from a ROI on detector.
         """
-        self.ptychographs[roi_name] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name], conc=True)
+        if self.beamtime == 'old':
+            if self.fast_axis_steps is None:
+                raise ValueError("fast_axis_steps is required")
+            self.ptychographs[roi_name] = stack_4d_data_old(self.dir, self.rois_dict[roi_name], self.fast_axis_steps, self.slow_axis)
+            
+        else:
+            self.ptychographs[roi_name] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name], conc=True)
         
         self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], mask_max_coh = mask_max_coh, mask_min_coh=mask_min_coh)
         
@@ -63,12 +77,15 @@ class load_data:
         """
         Plots one full frame of the detector
         """
-        file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
-        
-        file_name = self.dir+f'Scan_{self.scan_num}_data_{file_no_st}.h5'
-
-        with h5py.File(file_name,'r') as f:
-            data_test = f['/entry/data/data'][frame_no,:,:]
+        if self.beamtime == 'new':
+            file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
+            
+            file_name = self.dir+f'Scan_{self.scan_num}_data_{file_no_st}.h5'
+    
+            with h5py.File(file_name,'r') as f:
+                data_test = f['/entry/data/data'][frame_no,:,:]
+        else:
+            data_test = stack_4d_data_old(self.dir, self.rois_dict['full_det'], self.fast_axis_steps, self.slow_axis)[file_no,frame_no, :,:]
         
         fig, axes = plt.subplots(1, 2, figsize=(10,5))
 
@@ -83,6 +100,7 @@ class load_data:
         axes[1].axis('on')
 
         plt.tight_layout()
+        plt.show()
         
         
     def plot_detector_roi(self, roi_name, file_no, frame_no, title=None, vmin=None, vmax=None,mask_hot = False, save=False):
@@ -231,8 +249,11 @@ class load_data:
         #display(fig)  # Display the figure
         
     def average_frames_roi(self, roi_name):
+        if self.beamtime == 'old':
+            self.averaged_data[roi_name] = average_data_old(self.dir, self.rois_dict[roi_name])
+        else:
+            self.averaged_data[roi_name] = average_data(self.dir, self.fnames, self.rois_dict[roi_name], conc=True)
         
-        self.averaged_data[roi_name] = average_data(self.dir, self.fnames, self.rois_dict[roi_name], conc=True)
         self.averaged_data[roi_name] =  mask_hot_pixels(self.averaged_data[roi_name])
     
     def mask_roi(self, roi_name, hot_pixels = True, mask_val=1):

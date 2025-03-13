@@ -90,7 +90,7 @@ def init_hr_image(bounds_x, bounds_y, dks):
     return hr_obj_image, hr_fourier_image
 
 
-def mask_torch_ctf(outer_size):
+def mask_torch_ctf(outer_size, device=torch.device('cpu')):
     """
     Create a (2N, 2M) array with ones in the center region of size (N, M) and zeros elsewhere.
     
@@ -101,7 +101,7 @@ def mask_torch_ctf(outer_size):
     Returns:
         mask: (2N, 2M) torch.Tensor
     """
-    mask = torch.zeros(outer_size, dtype=torch.float32)
+    mask = torch.zeros(outer_size, dtype=torch.float32, device=device)
 
     # Calculate center indices
     N, M = outer_size[0]//2, outer_size[1]//2
