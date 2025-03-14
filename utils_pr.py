@@ -101,7 +101,7 @@ def mask_torch_ctf(outer_size, device=torch.device('cpu')):
     Returns:
         mask: (2N, 2M) torch.Tensor
     """
-    mask = torch.zeros(outer_size, dtype=torch.float32, device=device)
+    mask = torch.zeros(outer_size, dtype=torch.float64, device=device)
 
     # Calculate center indices
     N, M = outer_size[0]//2, outer_size[1]//2
