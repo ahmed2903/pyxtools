@@ -48,11 +48,11 @@ def prepare_dims(images, kout_vec, lr_psize, extend_to_double):
         range_x = kx_max - kx_min
         range_y = ky_max - ky_min
         
-        kx_min = kx_min - range_x/2
-        kx_max = kx_max + range_x/2
+        kx_min = kx_min - range_x
+        kx_max = kx_max + range_x
         
-        ky_min = ky_min - range_y/2
-        ky_max = ky_max + range_y/2
+        ky_min = ky_min - range_y
+        ky_max = ky_max + range_y
         
     else:
         # Object bandwidth 
