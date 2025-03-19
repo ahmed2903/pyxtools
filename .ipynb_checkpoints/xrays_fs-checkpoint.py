@@ -15,12 +15,10 @@ from . import atom_info as af
 def energy2wavelength_a(energy_kev: float) -> float:
     """
     Converts energy in keV to wavelength in A
-
     wavelength_a = energy2wave(energy_kev)
-
     lambda [A] = h*c/E = 12.3984 / E [keV]
-
     """
+    
     # Electron Volts:
     E = 1000 * energy_kev * ut.echarge
 
@@ -595,6 +593,8 @@ def compute_vectors(coordinates, detector_distance, pixel_size, central_pixel, w
     unit_vectors = pixel_vectors/np.linalg.norm(pixel_vectors, axis = 1)[:,np.newaxis]
 
     k = 2.0*np.pi /wavelength
+
+    unit_vectors = np.array(unit_vectors)
     
     ks = k*unit_vectors
 

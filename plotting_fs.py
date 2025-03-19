@@ -8,7 +8,9 @@ from matplotlib.patches import Rectangle
 from IPython.display import display
 from PIL import Image 
 import ipywidgets as widgets
+from .utils import time_it
 
+@time_it
 def create_gif_from_arrays(array_list, gif_name, fps=10, cmap="viridis"):
     """
     Create a GIF from a list of 2D arrays.

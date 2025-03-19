@@ -22,7 +22,7 @@ import scipy
 import scipy.fft
 from . import xrays_fs as xf
 from . import general_fs as gf
-
+from .utils import time_it
 
 def load_hdf_roi(data_folder, f_name, roi):
     """
@@ -62,6 +62,7 @@ def list_datafiles(data_folder):
                 
     return f_names
 
+@time_it
 def average_data_old(file_path,roi):
         
     with h5py.File(file_path,'r') as f:
@@ -69,7 +70,8 @@ def average_data_old(file_path,roi):
         data = np.mean(f['/entry/data/data'][:,roi[0]:roi[1], roi[2]:roi[3]], axis = 0)
         
     return data
-    
+
+@time_it 
 def average_data(data_folder, names_array, roi, conc=False):
     
     """
@@ -83,8 +85,6 @@ def average_data(data_folder, names_array, roi, conc=False):
     nx = roi[1] - roi[0] # roi vertical size
     ny = roi[3] - roi[2] # roi horizontal size
     
-    t1=time.perf_counter()
-
     if conc: 
         with concurrent.futures.ProcessPoolExecutor() as executor:
             all_data = list(executor.map(load_hdf_roi, [data_folder]*len(names_array), names_array, [roi]*len(names_array)))
@@ -97,14 +97,11 @@ def average_data(data_folder, names_array, roi, conc=False):
             
     stacked_data = np.concatenate(all_data,axis=0)
     average_data = np.mean(stacked_data, axis=0)
-        
-    t2=time.perf_counter()
 
-    print(f"Averaging finsihed in {t2-t1: .2f}s")
     
     return average_data
 
-    
+@time_it   
 def stack_data(data_folder, names_array, roi, conc = True):
     """
     Stacks all the data along the first dimension
@@ -114,7 +111,6 @@ def stack_data(data_folder, names_array, roi, conc = True):
     
     nx = roi[1] - roi[0] # roi vertical size
     ny = roi[3] - roi[2] # roi horizontal size
-    t1=time.perf_counter()
 
     if conc:
         with concurrent.futures.ProcessPoolExecutor() as executor:
@@ -126,14 +122,10 @@ def stack_data(data_folder, names_array, roi, conc = True):
             all_data.append(  load_hdf_roi(data_folder, names_array[i], roi)  )
     
     stacked_data = np.concatenate(all_data,axis=0)
-
-    t2=time.perf_counter()
-
-    print(f"finsihed in {t2-t1}")
     
     return stacked_data
     
-
+@time_it 
 def stack_4d_data(data_folder,names_array,roi, slow_axis = 0, conc = False):
 
     
@@ -141,7 +133,6 @@ def stack_4d_data(data_folder,names_array,roi, slow_axis = 0, conc = False):
     ny = roi[3] - roi[2] # roi horizontal size
     
 
-    t1=time.perf_counter()
     if conc:
         with concurrent.futures.ProcessPoolExecutor() as executor:
             all_data = list(executor.map(load_hdf_roi, [data_folder]*len(names_array), names_array, [roi]*len(names_array)))
@@ -151,10 +142,6 @@ def stack_4d_data(data_folder,names_array,roi, slow_axis = 0, conc = False):
         for i in range(len(names_array)):
             all_data.append(load_hdf_roi(data_folder, names_array[i], roi)  )
         all_data = np.array(all_data)
-    t2=time.perf_counter()
-
-    print(f"Stacking finsihed in {t2-t1: .2f}s")
-    
         
     stacked_data = np.stack(all_data, axis=0)
 
@@ -163,6 +150,7 @@ def stack_4d_data(data_folder,names_array,roi, slow_axis = 0, conc = False):
         stacked_data = np.transpose(stacked_data, (1,0,2,3))
     
     return stacked_data
+    
 def print_hdf5_keys(file_path):
     """
     Prints all keys (groups and datasets) in an HDF5 file.
@@ -181,7 +169,7 @@ def print_hdf5_keys(file_path):
         # Traverse the file and print all keys
         print(f"Keys in {file_path}:")
         f.visititems(print_keys)
-        
+@time_it        
 def stack_4d_data_old(file_path,roi, fast_axis_steps, slow_axis = 0):
 
     
@@ -224,14 +212,15 @@ def make_coherent_image(data: np.ndarray, pixel_idx:np.ndarray, slow_axis = 0):
     coherent_image = data[:,:,py,px]
 
     return coherent_image
-
+    
+@time_it
 def sum_pool2d_array(input_array, kernel_size, stride=None, padding=0):
     """
     Perform sum pooling on a 4D NumPy array or PyTorch tensor.
     
     Parameters:
-    - input_array: 4D NumPy array or PyTorch tensor (batch_size, channels, height, width)
-    - kernel_size: Size of the pooling kernel (e.g., 2 for 2x2 pooling).
+    - input_array: 4D NumPy array or PyTorch tensor
+    - kernel_size: Size of the pooling kernel.
     - stride: Stride of the pooling operation. Default is kernel_size.
     - padding: Amount of zero-padding added to both sides of the input. Default is 0.
     
@@ -277,20 +266,19 @@ def make_detector_image(data: np.ndarray, position_idx:np.ndarray):
 
     return detector_image
 
-def make_coordinates(array, mask_val, roi, crop):
+def make_coordinates(array, mask_val, roi, crop=False):
 
     
     if crop:
         array = array[roi[0]:roi[1], roi[2]:roi[3]]
         
-
     indices = np.where(array > mask_val)
     coords = np.array([(int(i)+ roi[0], int(j)+roi[2]) for i, j in zip(indices[0], indices[1])])
 
     return coords
 
 
-    
+@time_it   
 def mask_hot_pixels(array, mask_max_coh=False, mask_min_coh= False):
     """
     Masks hot pixels (maximum values in the last two dimensions) in a 4D array.
@@ -316,8 +304,10 @@ def mask_hot_pixels(array, mask_max_coh=False, mask_min_coh= False):
         max_values = np.max(array, axis=(1, 2), keepdims=True)
     # Mask all the values equal to the maximum value in the 2D slice with NaN (or 0)
     masked_array = np.where(array == max_values, 0.0, array)
+
+    if mask_max_coh or mask_min_coh:
+        med = np.median(masked_array, axis = (0,1))
     
-    med = np.median(masked_array, axis = (0,1))
     if mask_max_coh:
         masked_array = np.where(masked_array == max_values_coh, med, masked_array)
     if mask_min_coh:
@@ -451,7 +441,7 @@ def make_2dimensions_even(array_list):
     
     return padded_arrays
 
-
+@time_it
 def filter_images(images, coords, variance_threshold, kin_coords=None, **kwargs):
     """
     Filters images based on variance, with an optional entropy threshold. 
@@ -501,9 +491,9 @@ def filter_images(images, coords, variance_threshold, kin_coords=None, **kwargs)
 
     # Return results
     if kin_coords is not None:
-        return filtered_images, filtered_coords, filtered_kin_coords
+        return np.array(filtered_images), np.array(filtered_coords), np.array(filtered_kin_coords)
     else:
-        return filtered_images, filtered_coords
+        return np.array(filtered_images), np.array(filtered_coords)
     
 
 
@@ -597,6 +587,7 @@ def detect_object(image, threshold_factor=0.5):
     
     return labeled == largest_object_label  # Return object mask
 
+@time_it
 def detect_obj_parallel(image_list, threshold=.1, n_jobs = 8):
     """Applies background removal to all images in a list using multiprocessing."""
     result = Parallel(n_jobs=n_jobs)(delayed(detect_object)(im, threshold) for im in image_list)
@@ -644,7 +635,7 @@ def median_filter(image, kernel_size, stride, threshold):
             roi_original[outliers] = median_value
 
     return filtered_image
-
+@time_it
 def median_filter_parallel(images, kernel_size, stride, threshold, n_jobs=32):
     """
     Applies the median filter to a list of images in parallel.
@@ -666,33 +657,6 @@ def median_filter_parallel(images, kernel_size, stride, threshold, n_jobs=32):
 
     return filtered_images
 
-def pad_to_double(image_list):
-    """
-    Pads each 2D numpy array in a list to double its size.
-    The original image will be centered in the padded output.
-    
-    Args:
-        image_list: List of 2D numpy arrays
-        
-    Returns:
-        List of padded 2D numpy arrays, each with double the dimensions
-    """
-    padded_images = []
-    
-    for img in image_list:
-        # Get original dimensions
-        h, w = img.shape
-        
-        # Calculate padding for each side
-        pad_h = h // 2
-        pad_w = w // 2
-        
-        # Pad the image with zeros
-        padded_img = np.pad(img, ((pad_h, pad_h), (pad_w, pad_w)), mode='constant', constant_values=0)
-        
-        padded_images.append(padded_img)
-    
-    return padded_images
 
 def pad_to_double(img):
     """
@@ -718,6 +682,7 @@ def pad_to_double(img):
     
     return padded_img
 
+@time_it
 def pad_to_double_parallel(image_list, n_jobs=8):
     """
     Slices the center of each 2D numpy array in a list,
@@ -809,6 +774,7 @@ def shrink_wrap_2d_numpy(input_data, threshold=0.2, sigma=4):
 
     return mask
 
+@time_it
 def shrink_wrap_parallel(image_list, threshold=0.2, sigma=4, n_jobs=8):
     """
     Slices the center of each 2D numpy array in a list,
@@ -918,14 +884,14 @@ def bilateral_filter(image, sigma_spatial=3, sigma_range=50, kernel_size=7):
     filtered_image = cv2.bilateralFilter(image, d=kernel_size, sigmaColor=sigma_range, sigmaSpace=sigma_spatial)
 
     return filtered_image
-
+@time_it
 def bilateral_filter_parallel(image_list, sigma_spatial=3, sigma_range=50, kernel_size=7, n_jobs=8):
 
     # Use joblib to parallelize the median filter application
     padded_images = Parallel(n_jobs=n_jobs)(
         delayed(pad_to_double)(image, sigma_spatial,sigma_range,kernel_size) for image in image_list)
     return padded_images
-
+@time_it
 def reorder_pixels_from_center(pixel_coords, connected_array=None):
     """
     Reorders a list of pixel coordinates so that the sequence starts at the center

@@ -19,6 +19,7 @@ import concurrent
 from ..data_fs import * 
 from ..xrays_fs import compute_vectors
 from  ..plotting_fs import plot_roi_from_numpy, plot_pixel_order
+from ..utils import time_it
 
 class load_data:
     
@@ -66,10 +67,10 @@ class load_data:
             self.ptychographs[roi_name] = stack_4d_data_old(self.dir, self.rois_dict[roi_name], self.fast_axis_steps, self.slow_axis)
             
         else:
-            self.ptychographs[roi_name] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name], conc=True)
+            self.ptychographs[roi_name] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name], slow_axis = self.slow_axis, conc=True)
         
         self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], mask_max_coh = mask_max_coh, mask_min_coh=mask_min_coh)
-        
+    
     def plot_full_detector(self, file_no, frame_no, 
                           
                           vmin1=None, vmax1=None, 
@@ -249,11 +250,9 @@ class load_data:
         #display(fig)  # Display the figure
         
     def average_frames_roi(self, roi_name):
-        if self.beamtime == 'old':
-            self.averaged_data[roi_name] = average_data_old(self.dir, self.rois_dict[roi_name])
-        else:
-            self.averaged_data[roi_name] = average_data(self.dir, self.fnames, self.rois_dict[roi_name], conc=True)
         
+        self.averaged_data[roi_name] = np.mean(self.ptychographs[roi_name], axis=(0,1))
+            
         self.averaged_data[roi_name] =  mask_hot_pixels(self.averaged_data[roi_name])
     
     def mask_roi(self, roi_name, hot_pixels = True, mask_val=1):
@@ -264,7 +263,7 @@ class load_data:
     def plot_average_roi(self, roi_name, vmin=None, vmax=None, title=None):
             
             plot_roi_from_numpy(self.averaged_data[roi_name], [0,-1,0,-1], f"Averaged Frames for {roi_name}", vmin=vmin, vmax=vmax )
-            
+    @time_it
     def make_coherent_images(self, roi_name):
         
         """
@@ -280,8 +279,8 @@ class load_data:
             coh_img = make_coherent_image(self.ptychographs[roi_name], np.array([xp,yp]))
 
             coherent_imgs.append(coh_img)
-    
-        self.coherent_imgs[roi_name] = coherent_imgs
+
+        self.coherent_imgs[roi_name] = np.array(coherent_imgs)
         
     def even_dims_cohimages(self, roi_name):
         """
@@ -318,15 +317,16 @@ class load_data:
         self.kouts[roi_name] = compute_vectors(self.coords[roi_name], self.det_distance, self.det_psize, self.centre_pixel, self.wavelength)
 
     def pool_detector_space(self, roi_name, kernel_size, stride=None, padding=0):
-        print("Pooling Detector")
         self.ptychographs[roi_name] = sum_pool2d_array(self.ptychographs[roi_name], kernel_size=kernel_size, stride=stride, padding=padding)
-
+        if stride is None:
+            self.det_psize *= kernel_size
+        else:
+            self.det_psize *= stride
+            
     def remove_coh_background(self, roi_name, sigma):
-        print("Removing Background")
         self.coherent_imgs[roi_name] = remove_background_parallel(self.coherent_imgs[roi_name], sigma=sigma)
 
     def filter_by_median(self, roi_name, kernel_size, stride, threshold):
-        print("Median Filtering Pixels")
         self.coherent_imgs[roi_name] = median_filter_parallel(self.coherent_imgs[roi_name], 
                                                               kernel_size = kernel_size, 
                                                               stride = stride, 
