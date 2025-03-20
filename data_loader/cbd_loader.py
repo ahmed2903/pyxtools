@@ -109,13 +109,15 @@ class load_data:
         Plots a detector roi in one frame
         """
         
-        file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
-        
-        file_name = self.dir+f'Scan_{self.scan_num}_data_{file_no_st}.h5'
-
-        xs,xe,ys,ye = self.rois_dict[roi_name]
-        with h5py.File(file_name,'r') as f:
-            data_test = f['/entry/data/data'][frame_no,xs:xe,ys:ye]
+        if self.beamtime == 'new':
+            file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
+            
+            file_name = self.dir+f'Scan_{self.scan_num}_data_{file_no_st}.h5'
+    
+            with h5py.File(file_name,'r') as f:
+                data_test = f['/entry/data/data'][frame_no,:,:]
+        else:
+            data_test = stack_4d_data_old(self.dir, self.rois_dict[roi_name], self.fast_axis_steps, self.slow_axis)[file_no,frame_no, :,:]
 
         if mask_hot:
 
@@ -142,20 +144,21 @@ class load_data:
         
         
         # Set slider limits
-        px_slider = widgets.IntSlider(min=0, max= detector_shape[1] - 1, value=detector_shape[0]//2, description="px")
-        py_slider = widgets.IntSlider(min=0, max= detector_shape[0] - 1, value=detector_shape[1]//2, description="py")
-        lx_slider = widgets.IntSlider(min=0, max= coherent_shape[1] - 1, value=coherent_shape[1]//2, description="lx")
-        ly_slider = widgets.IntSlider(min=0, max= coherent_shape[0] - 1, value=coherent_shape[1]//2, description="ly")
+        pcol_slider = widgets.IntSlider(min=0, max= detector_shape[1] - 1, value=detector_shape[1]//2, description="px")
+        prow_slider = widgets.IntSlider(min=0, max= detector_shape[0] - 1, value=detector_shape[0]//2, description="py")
+        
+        lcol_slider = widgets.IntSlider(min=0, max= coherent_shape[1] - 1, value=coherent_shape[1]//2, description="lx")
+        lrow_slider = widgets.IntSlider(min=0, max= coherent_shape[0] - 1, value=coherent_shape[0]//2, description="ly")
 
 
-        rectangle_size_det = 4# Adjust the rectangle size as needed
+        rectangle_size_det = 4 
         rectangle_size_coh = 2
         
         # Create the figure and axes **only once**
         fig, axes = plt.subplots(1, 2, figsize=(10, 5))
 
-        coherent_image = make_coherent_image(self.ptychographs[roi_name], np.array([px_slider.value, py_slider.value]))
-        detector_image = make_detector_image(self.ptychographs[roi_name], np.array([lx_slider.value, ly_slider.value]))
+        coherent_image = make_coherent_image(self.ptychographs[roi_name], np.array([prow_slider.value, pcol_slider.value]))
+        detector_image = make_detector_image(self.ptychographs[roi_name], np.array([lrow_slider.value, lcol_slider.value]))
 
         vmin_c = np.mean(coherent_image) - 0.05 * np.mean(coherent_image)
         vmax_c = np.mean(coherent_image) + 0.05 * np.mean(coherent_image)
@@ -163,16 +166,18 @@ class load_data:
         vmax_d = np.mean(detector_image) + 2 * np.mean(detector_image)
 
         im0 = axes[0].imshow(coherent_image, cmap='plasma', vmin=vmin_c, vmax=vmax_c)
-        axes[0].set_title(f"Coherent Image (lx={lx_slider.value}, ly={ly_slider.value})")
-        rect_coherent = Rectangle((lx_slider.value - rectangle_size_coh / 2, ly_slider.value - rectangle_size_coh / 2), 
+        
+        axes[0].set_title(f"Coherent Image (lx={lrow_slider.value}, ly={lcol_slider.value})")
+        rect_coherent = Rectangle(( lcol_slider.value - rectangle_size_coh / 2, lrow_slider.value - rectangle_size_coh / 2), 
                                   rectangle_size_coh, rectangle_size_coh, 
                                   edgecolor='white', facecolor='none', lw=2)
+        
         axes[0].add_patch(rect_coherent)
         plt.colorbar(im0, ax=axes[0], label="Intensity")
 
         im1 = axes[1].imshow(detector_image, cmap='viridis', vmin=vmin_d, vmax=vmax_d)
-        axes[1].set_title(f"Detector Image (px={px_slider.value}, py={py_slider.value})")
-        rect_detector = Rectangle((px_slider.value - rectangle_size_det / 2, py_slider.value - rectangle_size_det / 2), 
+        axes[1].set_title(f"Detector Image (px={pcol_slider.value}, py={prow_slider.value})")
+        rect_detector = Rectangle((pcol_slider.value - rectangle_size_det / 2, prow_slider.value - rectangle_size_det / 2), 
                                   rectangle_size_det, rectangle_size_det, 
                                   edgecolor='white', facecolor='none', lw=2)
         axes[1].add_patch(rect_detector)
@@ -180,10 +185,10 @@ class load_data:
 
         plt.tight_layout()
         
-        def update_plot(px, py, lx, ly):
+        def update_plot(prow, pcol, lrow, lcol):
             """ Updates the plot based on slider values. """
-            coherent_image = make_coherent_image(self.ptychographs[roi_name], np.array([px, py]))
-            detector_image = make_detector_image(self.ptychographs[roi_name], np.array([lx, ly]))
+            coherent_image = make_coherent_image(self.ptychographs[roi_name], np.array([prow, pcol]))
+            detector_image = make_detector_image(self.ptychographs[roi_name], np.array([lrow, lcol]))
 
             vmin_c = np.mean(coherent_image) - 0.05 * np.mean(coherent_image)
             vmax_c = np.mean(coherent_image) + 0.05 * np.mean(coherent_image)
@@ -193,20 +198,20 @@ class load_data:
             im0.set_data(coherent_image)
             im1.set_data(detector_image)
 
-            axes[0].set_title(f"Coherent Image from Pixel ({px}, {py})")
+            axes[0].set_title(f"Coherent Image from Pixel ({pcol}, {prow})")
             im0.set_clim(vmin_c, vmax_c)
-            axes[1].set_title(f'Detector Image at Location ({lx},{ly})')
+            axes[1].set_title(f'Detector Image at Location ({lcol},{lrow})')
             im1.set_clim(vmin_d, vmax_d)
             
             # Update rectangles
-            rect_coherent.set_xy((lx - rectangle_size_coh / 2, ly - rectangle_size_coh / 2))
-            rect_detector.set_xy((px - rectangle_size_det / 2, py - rectangle_size_det / 2))
+            rect_coherent.set_xy((lcol - rectangle_size_coh / 2, lrow - rectangle_size_coh / 2))
+            rect_detector.set_xy((pcol - rectangle_size_det / 2, prow - rectangle_size_det / 2))
 
 
             fig.canvas.draw_idle()
             
         # Create interactive widget
-        interactive_plot = widgets.interactive(update_plot, px=px_slider, py=py_slider, lx=lx_slider, ly=ly_slider)
+        interactive_plot = widgets.interactive(update_plot, prow=prow_slider, pcol=pcol_slider, lrow=lrow_slider, lcol=lcol_slider)
         
         display(interactive_plot)  # Display the interactive widget
         
@@ -272,10 +277,11 @@ class load_data:
         
         coherent_imgs = []
         for i, coord in enumerate(self.coords[roi_name]):
-
+            
+            
             xp =  coord[0] - self.rois_dict[roi_name][0]
             yp =  coord[1] - self.rois_dict[roi_name][2]
-            
+
             coh_img = make_coherent_image(self.ptychographs[roi_name], np.array([xp,yp]))
 
             coherent_imgs.append(coh_img)
@@ -448,6 +454,10 @@ class load_data:
     def plot_pixel_space(self,roi_name, connection=True):
 
         plot_pixel_space(self.kouts[roi_name], connection=connection)
+
+    def align_coherent_images(self, roi_name):
+
+        self.coherent_imgs[roi_name] = align_images(self.coherent_imgs[roi_name])
         
     def prepare_roi(self, roi_name:str, 
                     mask_val: float, 
@@ -474,9 +484,7 @@ class load_data:
         self.average_frames_roi(roi_name=roi_name)
         self.make_kvector(roi_name=roi_name,mask_val= mask_val)
     
-    def align_coherent_images(self, roi_name):
-
-        self.coherent_imgs[roi_name] = align_images(self.coherent_imgs[roi_name])
+    
         
     def prepare_coherent_images(self, roi_name:str, 
                                 mask_region = None,

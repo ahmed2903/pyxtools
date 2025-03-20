@@ -209,7 +209,7 @@ def make_coherent_image(data: np.ndarray, pixel_idx:np.ndarray, slow_axis = 0):
     px = pixel_idx[0]
     py = pixel_idx[1]
     
-    coherent_image = data[:,:,py,px]
+    coherent_image = data[:,:,px,py]
 
     return coherent_image
     
