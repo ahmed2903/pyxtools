@@ -194,25 +194,6 @@ def stack_4d_data_old(file_path,roi, fast_axis_steps, slow_axis = 0):
     
     return stacked_data
 
-def make_coherent_image(data: np.ndarray, pixel_idx:np.ndarray, slow_axis = 0):
-    
-    """
-    Makes a single coherent image from a 4D data set that is size (M,N,x,y) using one pixel 
-    
-    M is the slow scan 
-    N is the fast scan
-    x,y are detector size
-    
-    pixel_idx: the index of the pixel in the detector to be used in the coherent image
-    """
-    
-    px = pixel_idx[0]
-    py = pixel_idx[1]
-    
-    coherent_image = data[:,:,px,py]
-
-    return coherent_image
-    
 @time_it
 def sum_pool2d_array(input_array, kernel_size, stride=None, padding=0):
     """
@@ -246,6 +227,27 @@ def sum_pool2d_array(input_array, kernel_size, stride=None, padding=0):
         return pooled.numpy()
         
     return pooled
+    
+def make_coherent_image(data: np.ndarray, pixel_idx:np.ndarray, slow_axis = 0):
+    
+    """
+    Makes a single coherent image from a 4D data set that is size (M,N,x,y) using one pixel 
+    
+    M is the slow scan 
+    N is the fast scan
+    x,y are detector size
+    
+    pixel_idx: the index of the pixel in the detector to be used in the coherent image
+    """
+    
+    px = pixel_idx[0]
+    py = pixel_idx[1]
+    
+    coherent_image = data[:,:,px,py]
+
+    return coherent_image
+    
+
 
 def make_detector_image(data: np.ndarray, position_idx:np.ndarray):
     
@@ -262,7 +264,7 @@ def make_detector_image(data: np.ndarray, position_idx:np.ndarray):
     px = position_idx[0]
     py = position_idx[1]
     
-    detector_image = data[py,px,:,:]
+    detector_image = data[px,py,:,:]
 
     return detector_image
 
@@ -517,7 +519,19 @@ def phase_correlation(ref_img, shifted_img):
     return shift  # Invert shift to align image
     
 def align_images(image_list):
-    """Align a list of shifted images based on the first image."""
+    """Align a list of shifted images based on the first image.
+
+    This function aligns the images by calculating the shift between the reference image 
+    (the first image in the list) and each subsequent image using phase correlation.
+    The aligned images are returned as a list.
+
+    Args:
+        image_list (list of np.ndarray): A list of images (numpy arrays) to be aligned.
+
+    Returns:
+        list of np.ndarray: A list of aligned images.
+    
+    """
     aligned_images = []
     ref_img = image_list[0]  # Use first image as reference
     aligned_images.append(ref_img)
@@ -855,16 +869,15 @@ def threshold_data(image_list, threshold_value):
         threshold_value (float):
 
     Returns:
-        list of np.ndarray: A list where each image is filtered 
+        np.ndarray: Each image is filtered 
     """
     filtered_imgs = []
     
     for img in image_list:
-        # Compute histogram (normalized)
         filt_img = np.where(img<threshold_value, 0, img)
         filtered_imgs.append(filt_img)
 
-    return filtered_imgs
+    return np.array(filtered_imgs)
 
 def bilateral_filter(image, sigma_spatial=3, sigma_range=50, kernel_size=7):
     """
