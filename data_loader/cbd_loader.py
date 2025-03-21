@@ -17,8 +17,8 @@ from IPython.display import display
 import concurrent
 
 from data_fs import * 
-from kvectors import compute_vectors, optimise_kin, reverse_kins_to_pixels
-from  plotting import plot_roi_from_numpy, plot_pixel_space
+from kvectors import compute_vectors, optimise_kin, reverse_kins_to_pixels, rotation_matrix
+from  plotting import plot_roi_from_numpy, plot_pixel_space, plot_map_on_detector
 from utils import time_it
 try:
     import ipywidgets as widgets
@@ -77,7 +77,8 @@ class load_data:
         self.kins = {}
         self.kin_coords = {}
         self.coherent_imgs = {}
-        
+        self.optimal_angles = {}
+        self.g_init = {}
         if self.beamtime == 'new':
             self.fnames = list_datafiles(self.dir)[:-2]        
         
@@ -267,16 +268,59 @@ class load_data:
         self.kouts[roi_name] = compute_vectors(self.kout_coords[roi_name], self.det_distance, self.det_psize, self.centre_pixel, self.wavelength)
         
     def compute_kins(self, roi_name, est_ttheta, method = "BFGS", gtol = 1e-6):
-        
+        """
+        Computes the incident wavevectors (kins) for a given region of interest (ROI) 
+        by optimizing the initial q-vector estimate.
+
+        Args:
+            roi_name (str): 
+                The name of the region of interest (ROI) for which kins are computed.
+            est_ttheta (float): 
+                Estimated scattering angle (two-theta) in radians.
+            method (str, optional): 
+                Optimization method to use for minimizing the k-vector difference. 
+                Defaults to "BFGS".
+            gtol (float, optional): 
+                Gradient tolerance for optimization. Defaults to 1e-6.
+
+        Raises:
+            ValueError: If the pupil kouts have not been computed before calling this function.
+
+        Updates the following attributes of the instance:
+            - `self.kins[roi_name]`: Optimized incident wavevectors.
+            - `self.optimal_angles[roi_name]`: Optimized rotation angles (alpha, beta, gamma).
+            - `self.kin_coords[roi_name]`: Pixel coordinates corresponding to `self.kins[roi_name]`.
+        """
         try:
-            kins_avg = np.mean(self.kouts["pupil"], axis = 0, keepdims = True )
+            self.kins_avg = np.mean(self.kouts["pupil"], axis = 0, keepdims = True )
         except:
             raise ValueError("Must compute pupil kouts first")
         
-        g_init = xf.calc_qvec(self.kouts[roi_name], kins_avg, ttheta = est_ttheta, wavelength= self.wavelength)
+        self.g_init[roi_name] = xf.calc_qvec(self.kouts[roi_name], self.kins_avg, ttheta = est_ttheta, wavelength= self.wavelength)
 
-        self.kins[roi_name], _ = optimise_kin(g_init, est_ttheta, self.kouts[roi_name], self.wavelength, method, gtol)
+        self.kins[roi_name], self.optimal_angles[roi_name] = optimise_kin(self.g_init[roi_name], est_ttheta, self.kouts[roi_name], self.wavelength, method, gtol)
         
+        self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], self.det_psize, self.det_distance, self.centre_pixel)
+    
+    def refine_kins(self, roi_name, shifts):
+        """
+        Refine the estimated incident wavevectors (kins) by adjusting the optimal angles.
+
+        Args:
+            roi_name (str): The region of interest name.
+            shifts (tuple): A tuple of (alpha_shift, beta_shift, gamma_shift) to refine angles.
+        """
+        alpha,beta,gamma = (self.optimal_angles[roi_name][0] + shifts[0],
+                            self.optimal_angles[roi_name][1] + shifts[1],
+                            self.optimal_angles[roi_name][2] + shifts[2] )
+        
+        R = rotation_matrix(alpha, beta, gamma)
+        g_update = R@self.g_init[roi_name]
+        
+        kin_opt = (self.kouts[roi_name]-g_update)
+        kin_opt /= np.linalg.norm(kin_opt, axis = 1)[:,np.newaxis]
+        kin_opt *= 2*np.pi/self.wavelength
+        self.kins[roi_name] = kin_opt
         self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], self.det_psize, self.det_distance, self.centre_pixel)
         
     ################### preprocessing coherent images ###################
@@ -914,8 +958,14 @@ class load_data:
             title = f"Detector image at {roi_name} in Frame ({file_no}, {frame_no})"
         plot_roi_from_numpy(data_test, self.rois_dict[roi_name], title, vmin=vmin, vmax=vmax, save = save)
     
-    
-    
+    def plot_calculated_kins(self,roi_name,vmin=None, vmax = None, title="Mapped kins onto pupil", cmap = "viridis"):
+        
+        plot_map_on_detector(self.averaged_data["pupil"], self.kin_coords[roi_name], vmin, vmax, title, cmap, crop=False,roi= self.rois_dict["pupil"])
+
+    def plot_kouts(self, roi_name, vmin=None, vmax = None, title="Mapped kouts", cmap = "viridis"):
+        plot_map_on_detector(self.averaged_data[roi_name], self.kin_coords[roi_name], vmin, vmax, title, cmap, crop=False,roi= self.rois_dict[roi_name])
+
+        
     ################### Prepares the data ###################
     def prepare_roi(self, roi_name:str, 
                     mask_val: float, 

@@ -202,52 +202,7 @@ def plot_vecs(kins, kouts, qvecs):
         plotter.show()
         plotter.close()
 
-def plot_map_on_detector(detec_image, k_map, vmin, vmax, title, cmap, **kwargs):
 
-    """
-
-    optional args: 
-        color: color of the rectangle
-        rec_size: size of the rectangle
-        fname: if passed, figure will be saved as the fname
-    """
-
-    if 'roi' in kwargs:
-        roi = kwargs['roi']
-        sx, ex, sy, ey = roi
-        detec_image = detec_image[sx:ex, sy:ey]
-        
-        
-    else:
-        sx = 0
-        sy = 0
-        
-    fig, ax = plt.subplots()
-
-    if 'color' in kwargs:
-        color = kwargs['color']
-    else: 
-        color = 'white'
-
-    if 'rec_size' in kwargs:
-        rec_size = kwargs['rec_size']
-    else: 
-        rec_size = 1
-        
-    # Add a white rectangle at each of the indices
-    for idx in k_map:
-        rect_x = idx[1] - 1 - sy  # X-coordinate of the bottom-left corner
-        rect_y = idx[0] - 1 - sx # Y-coordinate of the bottom-left corner
-        rect = patches.Rectangle((rect_x, rect_y), rec_size, rec_size, linewidth=2, edgecolor=color, facecolor=color)
-        ax.add_patch(rect)
-
-    ax.imshow(detec_image, cmap=cmap,  vmin=vmin, vmax=vmax, origin = 'lower')
-    plt.title(title)
-    if 'fname' in kwargs:
-        name = kwargs['fname']
-        plt.savefig(name)
-    
-    plt.show()
 
 from matplotlib.animation import FuncAnimation
 from IPython.display import display, clear_output
