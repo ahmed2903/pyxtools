@@ -12,15 +12,20 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from matplotlib.widgets import Button, TextBox
 from matplotlib.patches import Rectangle
-import ipywidgets as widgets
+
+    
 from IPython.display import display
 import concurrent
 
 from ..data_fs import * 
-from ..xrays_fs import compute_vectors
-from  ..plotting_fs import plot_roi_from_numpy, plot_pixel_order
+from ..xrays_fs import compute_vectors, optimise_kin, objective_function, reverse_kins_to_pixels
+from  ..plotting_fs import plot_roi_from_numpy
 from ..utils import time_it
-
+try:
+    import ipywidgets as widgets
+except:
+    print("ipywdigets wont work outisde jupyter notebook")
+    
 class load_data:
     """
     Class for loading and organizing experimental scan data.
@@ -68,14 +73,16 @@ class load_data:
         self.ptychographs = {}
         self.averaged_data = {}
         self.images_object = {}
-        self.coords = {}
+        self.kout_coords = {}
         self.kouts = {}
+        self.kins = {}
+        self.kin_coords = {}
         self.coherent_imgs = {}
         
         if self.beamtime == 'new':
             self.fnames = list_datafiles(self.dir)[:-2]        
         
-
+    ################### Loading data ###################
     def make_4d_dataset(self, roi_name: str, mask_max_coh=False, mask_min_coh= False):
         
         """Creates a 4D dataset from a region of interest (ROI) on the detector.
@@ -102,6 +109,420 @@ class load_data:
         
         self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], mask_max_coh = mask_max_coh, mask_min_coh=mask_min_coh)
     
+    ################### prepare detector roi ###################
+    def add_roi(self, roi_name:str , roi:list):
+        """Adds a region of interest (ROI) to the dictionary.
+
+        This method stores an ROI with its name and coordinates in the `rois_dict` dictionary.
+        The coordinates are given as a list [xstart, xend, ystart, yend].
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI).
+            roi (list): A list containing the coordinates of the ROI in the format [xstart, xend, ystart, yend].
+    
+        Updates:
+            self.rois_dict (dict): The dictionary storing the ROIs with their names as keys and coordinates as values.
+        """
+        self.rois_dict[roi_name] = roi 
+    def average_frames_roi(self, roi_name):
+        """Averages the frames of the dataset for a given region of interest (ROI).
+
+        This method computes the average of all frames in the 4D dataset for a specific ROI 
+        (region of interest), along the fast and slow axes. It then applies a hot pixel mask 
+        to the resulting averaged data to remove unwanted noise.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) to be processed. 
+                             The ROI should be present in the `self.ptychographs` dictionary.
+    
+        Updates:
+            The `self.averaged_data` dictionary with the averaged data for the specified ROI 
+            after applying the hot pixel mask.
+        """
+        self.averaged_data[roi_name] = np.mean(self.ptychographs[roi_name], axis=(0,1))
+            
+        self.averaged_data[roi_name] =  mask_hot_pixels(self.averaged_data[roi_name])
+    def mask_hotpixels_roi(self, roi_name, hot_pixels = True, mask_val=1):
+        """Applies a mask to the region of interest (ROI) to remove hot pixels.
+    
+        This method masks hot pixels in the specified ROI's dataset by calling the 
+        `mask_hot_pixels` function. The masking is performed on the 4D dataset for 
+        the given ROI. The option to mask hot pixels is controlled by the `hot_pixels` 
+        argument.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) to be processed. 
+                             The ROI should be present in the `self.ptychographs` dictionary.
+            hot_pixels (bool, optional): If True, the method will mask hot pixels in the ROI data. 
+                                         Default is True.
+            mask_val (int, optional): The value to use for masking. Currently not used in the function. 
+                                      Default is 1.
+    
+        Updates:
+            The `self.ptychographs` dictionary with the masked data for the specified ROI, 
+            after applying the hot pixel mask (if `hot_pixels` is True).
+        """
+        if hot_pixels:
+            self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], mask_coh_img=self.mask_coh_img)
+    
+    def pool_detector_space(self, roi_name, kernel_size, stride=None, padding=0):
+        """Performs pooling on the detector space for a given region of interest (ROI).
+
+        This method applies a 2D sum pooling operation on the ptychograph data of a 
+        specific region of interest (ROI). It reduces the spatial resolution of the 
+        detector space by pooling with a given kernel size, stride, and padding. 
+        If the stride is not provided, it will default to the kernel size.
+
+        The efective detector pixel is modified accordingly.
+        
+        Args:
+            roi_name (str): The name of the region of interest (ROI) to be processed.
+            kernel_size (int): The size of the pooling kernel, determining the window 
+                                over which the sum pooling is applied.
+            stride (int, optional): The stride of the pooling operation, i.e., the 
+                                     step size between each pooling operation. If 
+                                     not provided, defaults to `kernel_size`.
+            padding (int, optional): The amount of zero padding to add around the 
+                                      edges of the image before pooling. Defaults to 0.
+        """
+        
+        self.ptychographs[roi_name] = sum_pool2d_array(self.ptychographs[roi_name], kernel_size=kernel_size, stride=stride, padding=padding)
+        if stride is None:
+            self.det_psize *= kernel_size
+        else:
+            self.det_psize *= stride
+    def normalise_detector(self, roi_name_ref, roi_name_op):
+        """Normalizes the detector data based on the reference ROI's peak intensity.
+
+        This method normalizes the ptychograph data for a given ROI (region of interest) 
+        by scaling the intensity of the detector data from a reference ROI. The normalization 
+        is performed by adjusting the intensity of the operating ROI to match the average 
+        intensity of the reference ROI.
+    
+        If the ptychograph data for the reference ROI is not already available, it is 
+        loaded from the specified directory, and any hot pixels are masked before proceeding.
+    
+        Args:
+            roi_name_ref (str): The name of the reference region of interest (ROI) used 
+                                 for calculating the peak intensity.
+            roi_name_op (str): The name of the operating region of interest (ROI) to be normalized.
+    
+        """
+        try:
+            peak_intensity = np.sum(self.ptychographs[roi_name_ref], axis=(-2,-1))
+        except: 
+            self.ptychographs[roi_name_ref] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name_ref], conc=True)
+            self.ptychographs[roi_name_ref] = mask_hot_pixels(self.ptychographs[roi_name_ref])
+            peak_intensity = np.sum(self.ptychographs[roi_name_ref], axis=(-2,-1))
+        
+        avg_intensity = np.mean(peak_intensity)
+        self.ptychographs[roi_name_op] = self.ptychographs[roi_name_op]/peak_intensity[...,np.newaxis, np.newaxis] * avg_intensity
+    def mask_region_detector(self, roi_name, region, mode = 'zeros'):
+        """Masks a specific region of the detector data within the given ROI.
+
+        This method applies a median mask to a specified region within the detector data 
+        (ptychographs) of a particular region of interest (ROI). The region is defined by the 
+        `region` argument, which specifies the start and end indices for both the x and y 
+        dimensions. The region is replaced by the median value of the corresponding region 
+        across all detector data.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) whose detector data 
+                             will be modified.
+            region (tuple): A tuple (sx, ex, sy, ey) specifying the start and end indices 
+                            for the region to be masked:
+                            - sx, ex: x-axis start and end indices
+                            - sy, ey: y-axis start and end indices
+            mode (str, optional): A string specifying how to replace the masked region. 
+                            - 'zeros'. Default.
+                            - 'median'
+                            - 'ones'
+        """
+        sx,ex,sy,ey = region
+        if mode == 'zeros':
+            self.ptychographs[roi_name][:,:,sx:ex,sy:ey] = 0.0
+        elif mode == 'median':
+            self.ptychographs[roi_name][:,:,sx:ex,sy:ey] = np.median(self.ptychographs[roi_name], axis = (2,3))[:,:,np.newaxis, np.newaxis]
+        elif mode == 'ones':
+            self.ptychographs[roi_name][:,:,sx:ex,sy:ey] = 1.0
+    
+    
+    ################### Compute k_in vectors ###################
+    
+    def make_kouts(self, roi_name, mask_val):
+        """Computes the k-space vectors for a given region of interest (ROI).
+
+        This method calculates the pixel coordinates and k-space vectors for a specified 
+        region of interest (ROI) using the averaged data. It uses the given mask value 
+        to filter out unwanted pixels and computes the k-space vectors based on the 
+        coordinates, detector distance, pixel size, center pixel, and wavelength.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) for which the 
+                             k-space vectors are to be computed.
+            mask_val (float): The value used for masking pixels during coordinate 
+                              computation.
+    
+        """
+        self.kout_coords[roi_name] = make_coordinates(self.averaged_data[roi_name], mask_val, self.rois_dict[roi_name], crop=False)
+        self.kouts[roi_name] = compute_vectors(self.kout_coords[roi_name], self.det_distance, self.det_psize, self.centre_pixel, self.wavelength)
+        
+    def compute_kins(self, roi_name, est_ttheta, method = "BFGS", gtol = 1e-6):
+        
+        try:
+            g_init = np.mean(self.kouts["pupil"], axis = 0)
+        except:
+            raise ValueError("Must compute pupil kouts first")
+        
+        self.kins[roi_name], _ = optimise_kin(g_init, est_ttheta, self.kouts[roi_name], self.wavelength, method, gtol)
+        
+        self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], self.det_psize, self.det_distance, self.centre_pixel)
+        
+    ################### preprocessing coherent images ###################
+    @time_it
+    def make_coherent_images(self, roi_name):
+        
+        """
+        Generates a list of coherent images for a given region of interest (ROI).
+
+        This method creates coherent images by processing the coordinates of the specified 
+        ROI and calling the `make_coherent_image` function for each coordinate. The results 
+        are stored in `self.coherent_imgs` for further use.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) for which the coherent 
+                             images will be generated. The coordinates for the ROI are 
+                             retrieved from `self.kout_coords[roi_name]`, and the corresponding 
+                             ptychographic data is accessed from `self.ptychographs[roi_name]`.
+    
+        """
+        
+        coherent_imgs = []
+        for i, coord in enumerate(self.kout_coords[roi_name]):
+            
+            
+            xp =  coord[0] - self.rois_dict[roi_name][0]
+            yp =  coord[1] - self.rois_dict[roi_name][2]
+
+            coh_img = make_coherent_image(self.ptychographs[roi_name], np.array([xp,yp]))
+
+            coherent_imgs.append(coh_img)
+
+        self.coherent_imgs[roi_name] = np.array(coherent_imgs)  
+    def filter_coherent_images(self, roi_name:str, variance_threshold):
+        """Filters coherent images based on variance threshold.
+
+        This method filters out noisy or low-variance coherent images for a given 
+        region of interest (ROI) by using a variance threshold. It removes images 
+        with variance below the specified threshold and updates the coherent images, 
+        coordinates, and kx, ky values accordingly.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) for which the 
+                             coherent images will be filtered.
+            variance_threshold (float): The threshold value for variance. Images with 
+                                        variance below this threshold will be filtered out.
+    
+        """
+        
+        cleaned_coh_images, cleaned_kins, cleaned_kxky = filter_images(self.coherent_imgs[roi_name], 
+                                                                         coords = self.kins[roi_name],
+                                                                         kin_coords=self.kouts[roi_name], 
+                                                                         variance_threshold = variance_threshold)
+    
+
+        self.coherent_imgs[roi_name] = cleaned_coh_images
+        self.kouts[roi_name] = cleaned_kxky
+        self.kins[roi_name] = cleaned_kins
+    def remove_coh_background(self, roi_name, sigma):
+        """Removes the background noise from coherent images for a given region of interest (ROI).
+
+        This method applies a background removal technique to the coherent images 
+        of a specific region of interest (ROI) using a Gaussian filter with a given 
+        standard deviation (sigma). The process helps to reduce unwanted background 
+        noise in the coherent images, improving the signal-to-noise ratio.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) whose coherent 
+                             images will be processed.
+            sigma (float): The standard deviation of the Gaussian filter used for 
+                           background removal. A higher value will smooth the image 
+                           more, removing more background noise but potentially 
+                           blurring fine details.
+        """
+        
+        self.coherent_imgs[roi_name] = remove_background_parallel(self.coherent_imgs[roi_name], sigma=sigma)
+    
+    def even_dims_cohimages(self, roi_name):
+        """Adjusts the dimensions of coherent images to be even.
+
+        This method takes the coherent images for a given region of interest (ROI) 
+        and ensures that their dimensions are even by calling the `make_2dimensions_even` function.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) for which the coherent 
+                             images will have their dimensions adjusted. The coherent images 
+                             are accessed from `self.coherent_imgs[roi_name]`.
+    
+        """
+        
+        self.coherent_imgs[roi_name] = make_2dimensions_even(self.coherent_imgs[roi_name])
+    def order_pixels(self, roi_name):
+        """Reorders the pixels of coherent images and corresponding k-vectors based on their distance from the center.
+    
+        This method reorders the coherent images and updates the corresponding k-vectors
+        based on their distance from the center. The reordering is done to facilitate specific analysis or
+        visualization by aligning the data in a certain order.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) for which the pixels 
+                             and k-vectors will be reordered.
+        """
+        self.kouts[roi_name], self.coherent_imgs[roi_name] = reorder_pixels_from_center(self.kouts[roi_name], connected_array=np.array(self.coherent_imgs[roi_name]))
+    
+    def apply_median_filter(self, roi_name, kernel_size, stride, threshold):
+        """Applies a median filter to coherent images for a given region of interest (ROI).
+
+        This method applies a median filter to the coherent images of a specified 
+        region of interest (ROI). The filter helps to remove noise and outliers by 
+        replacing each pixel's value with the median of its neighbors within a 
+        specified kernel. The filter can also apply a threshold to the pixel values 
+        for further noise reduction. The filtering is done in parallel using multiple 
+        CPU cores to speed up the process.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) whose coherent 
+                             images will be processed.
+            kernel_size (int): The size of the square kernel to be used for the 
+                                median filter. A larger kernel size will result in 
+                                stronger smoothing.
+            stride (int): The step size for applying the kernel across the image. 
+                           A higher stride will apply the filter less frequently.
+            threshold (float): The threshold value used to filter out small intensity 
+                               variations, helping to remove noise and improve the 
+                               quality of the coherent images.
+        """
+        self.coherent_imgs[roi_name] = median_filter_parallel(self.coherent_imgs[roi_name], 
+                                                              kernel_size = kernel_size, 
+                                                              stride = stride, 
+                                                              threshold=threshold, 
+                                                              n_jobs=32)
+    def apply_bilateral_filter(self, roi_name, sigma_spatial, sigma_range, kernel_size):
+        """Applies a bilateral filter to the coherent images for a given region of interest (ROI).
+
+        This method applies a bilateral filter to the coherent images of a specified 
+        region of interest (ROI). The bilateral filter smooths the image while preserving 
+        edges by considering both spatial proximity and intensity similarity. It uses 
+        two parameters: `sigma_spatial` controls the spatial smoothing, and `sigma_range` 
+        controls the intensity smoothing. The kernel size defines the size of the neighborhood 
+        for the filter.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) whose coherent 
+                             images will be processed.
+            sigma_spatial (float): The standard deviation of the spatial Gaussian filter. 
+                                   Larger values result in greater spatial smoothing.
+            sigma_range (float): The standard deviation of the range (intensity) Gaussian 
+                                 filter. Larger values preserve more intensity variation.
+            kernel_size (int): The size of the square kernel to be used for the bilateral 
+                            filter. A larger kernel size will result in stronger filtering.
+    """
+        self.coherent_images[roi_name] = bilateral_filter_parallel(self.coherent_images[roi_name], sigma_spatial, sigma_range, kernel_size)
+    def detect_object(self, roi_name, threshold, min_val, max_val):
+        """Detects objects within the specified region of interest (ROI) and filters based on intensity.
+
+        This method applies an object detection algorithm to the coherent images in the given 
+        region of interest (ROI), based on a specified intensity threshold. The detected objects 
+        are then filtered based on their total intensity being within the specified `min_val` 
+        and `max_val` range. Only objects that meet these criteria are retained.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) to process.
+            threshold (float): The intensity threshold for object detection. Objects with intensity 
+                               below this threshold will not be detected.
+            min_val (float): The minimum intensity threshold for filtering detected objects.
+            max_val (float): The maximum intensity threshold for filtering detected objects.
+    
+        """
+        self.images_object[roi_name] = detect_obj_parallel(self.coherent_imgs[roi_name], threshold=threshold)
+        mask = [np.sum(im) > min_val and np.sum(im) < max_val for im in self.images_object[roi_name]]
+
+        
+        self.coherent_imgs[roi_name] = np.array(self.coherent_imgs[roi_name])[mask]
+        self.kouts[roi_name] = np.array(self.kouts[roi_name])[mask]
+        self.kins[roi_name] = np.array(self.kins[roi_name])[mask]
+    def blur_detected_objs(self, roi_name, sigma):
+        """Applies Gaussian blur to the detected objects in the specified region of interest (ROI).
+
+        This method applies a Gaussian blur to the images of detected objects within a 
+        given region of interest (ROI). The blur is controlled by the `sigma` parameter, 
+        which determines the standard deviation of the Gaussian kernel. A larger `sigma` 
+        results in a stronger blur.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) whose detected object 
+                             images will be blurred.
+            sigma (float): The standard deviation of the Gaussian filter. Larger values 
+                           result in more blurring.
+    
+        """
+        self.images_object[roi_name] = apply_gaussian_blur(self.images_object[roi_name], sigma=sigma)
+    def mask_cohimgs_threshold(self, roi_name, threshold_value):
+        """Applies a threshold mask to the coherent images in the given ROI.
+
+        This method thresholds the coherent images for the specified region of interest (ROI) 
+        by applying a threshold value. Any values below the threshold will be masked or set 
+        to zero, and values above the threshold will remain unchanged.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) whose coherent images 
+                             will be thresholded.
+            threshold_value (float): The threshold value used for masking the coherent images. 
+                                      Values below this threshold will be masked.
+    
+        """
+        self.coherent_imgs[roi_name] = threshold_data(self.coherent_imgs[roi_name], threshold_value)
+    def mask_region_cohimgs(self, roi_name, region, mode = 'zeros'):
+        """Masks a specific region of coherent images within the given ROI.
+
+        This method applies a median mask to a specified region within the coherent images 
+        of a particular region of interest (ROI). The region is defined by the `region` argument, 
+        which specifies the start and end indices for both the x and y dimensions. The region is 
+        replaced by the median value of the corresponding region across all images.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) whose coherent images 
+                             will be modified.
+            region (tuple): A tuple (sx, ex, sy, ey) specifying the start and end indices 
+                            for the region to be masked:
+                            - sx, ex: x-axis start and end indices
+                            - sy, ey: y-axis start and end indices
+            mode (str, optional): A string specifying how to replace the masked region. 
+                            - 'zeros'. Default.
+                            - 'median'
+                            - 'ones'
+        """
+        sx,ex,sy,ey = region
+        self.coherent_imgs[roi_name] = np.array(self.coherent_imgs[roi_name])
+        if mode == 'zeros':
+            self.coherent_imgs[roi_name][:,sx:ex,sy:ey] = 0.0
+        elif mode == 'median':
+            self.coherent_imgs[roi_name][:,sx:ex,sy:ey] = np.median(self.coherent_imgs[roi_name], axis = (1,2))[:,np.newaxis, np.newaxis]
+        elif mode == 'ones':
+            self.coherent_imgs[roi_name][:,sx:ex,sy:ey] = 1.0
+    def align_coherent_images(self, roi_name):
+        """Aligns a list of coherent images for a given region of interest (ROI).
+
+        This method uses the first image in the list as a reference and aligns the subsequent 
+        images in the list by applying phase correlation to estimate and correct the shifts.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) whose coherent images
+                             will be aligned.
+    
+        """
+        self.coherent_imgs[roi_name] = align_images(self.coherent_imgs[roi_name])
+    ################### Plotting ###################
     def plot_full_detector(self, file_no, frame_no, 
                           
                           vmin1=None, vmax1=None, 
@@ -151,65 +572,6 @@ class load_data:
 
         plt.tight_layout()
         plt.show()
-        
-        
-    def plot_detector_roi(self, roi_name, file_no, frame_no, title=None, vmin=None, vmax=None,mask_hot = False, save=False):
-        """Plots a region of interest (ROI) on the detector for a given frame.
-
-        This method retrieves a specific ROI from the detector data and visualizes it.
-        It supports optional hot pixel masking and saving of the generated plot.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) to be plotted.
-            file_no (int): The file number to retrieve the frame from.
-            frame_no (int): The frame number within the specified file.
-            title (str, optional): The title of the plot. Defaults to an auto-generated title.
-            vmin (float, optional): Minimum intensity value for visualization. Defaults to None.
-            vmax (float, optional): Maximum intensity value for visualization. Defaults to None.
-            mask_hot (bool, optional): Whether to apply hot pixel masking. Defaults to False.
-            save (bool, optional): Whether to save the plotted image. Defaults to False.
-    
-        Raises:
-            KeyError: If the specified ROI name is not found in `self.rois_dict`.
-    
-        Displays:
-            A plot of the selected ROI on the detector.
-        """
-        
-        if self.beamtime == 'new':
-            file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
-            
-            file_name = self.dir+f'Scan_{self.scan_num}_data_{file_no_st}.h5'
-    
-            with h5py.File(file_name,'r') as f:
-                data_test = f['/entry/data/data'][frame_no,:,:]
-        else:
-            data_test = stack_4d_data_old(self.dir, self.rois_dict[roi_name], self.fast_axis_steps, self.slow_axis)[file_no,frame_no, :,:]
-
-        if mask_hot:
-
-            data_test = mask_hot_pixels(data_test)
-        if title is None:
-            title = f"Detector image at {roi_name} in Frame ({file_no}, {frame_no})"
-        plot_roi_from_numpy(data_test, [0,-1,0,-1], title, vmin=vmin, vmax=vmax, save = save)
-        
-    
-    def add_roi(self, roi_name:str , roi:list):
-        """Adds a region of interest (ROI) to the dictionary.
-
-        This method stores an ROI with its name and coordinates in the `rois_dict` dictionary.
-        The coordinates are given as a list [xstart, xend, ystart, yend].
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI).
-            roi (list): A list containing the coordinates of the ROI in the format [xstart, xend, ystart, yend].
-    
-        Updates:
-            self.rois_dict (dict): The dictionary storing the ROIs with their names as keys and coordinates as values.
-        """
-        self.rois_dict[roi_name] = roi 
-     
-        
     def plot_4d_dataset(self, roi_name: str):
         """Plots the 4D dataset for a specified region of interest (ROI).
     
@@ -312,7 +674,6 @@ class load_data:
         interactive_plot = widgets.interactive(update_plot, prow=prow_slider, pcol=pcol_slider, lrow=lrow_slider, lcol=lcol_slider)
         
         display(interactive_plot)  # Display the interactive widget
-        
     def plot_coherent_sequence(self, roi_name: str, scale_factor = .4):
         """Displays a sequence of coherent images and allows scrolling through them via a slider.
         
@@ -366,145 +727,6 @@ class load_data:
 
         display(interactive_plot)  # Show slider
         #display(fig)  # Display the figure
-        
-    def average_frames_roi(self, roi_name):
-        """Averages the frames of the dataset for a given region of interest (ROI).
-
-        This method computes the average of all frames in the 4D dataset for a specific ROI 
-        (region of interest), along the fast and slow axes. It then applies a hot pixel mask 
-        to the resulting averaged data to remove unwanted noise.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) to be processed. 
-                             The ROI should be present in the `self.ptychographs` dictionary.
-    
-        Updates:
-            The `self.averaged_data` dictionary with the averaged data for the specified ROI 
-            after applying the hot pixel mask.
-        """
-        self.averaged_data[roi_name] = np.mean(self.ptychographs[roi_name], axis=(0,1))
-            
-        self.averaged_data[roi_name] =  mask_hot_pixels(self.averaged_data[roi_name])
-    
-    def mask_roi(self, roi_name, hot_pixels = True, mask_val=1):
-        """Applies a mask to the region of interest (ROI) to remove hot pixels.
-    
-        This method masks hot pixels in the specified ROI's dataset by calling the 
-        `mask_hot_pixels` function. The masking is performed on the 4D dataset for 
-        the given ROI. The option to mask hot pixels is controlled by the `hot_pixels` 
-        argument.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) to be processed. 
-                             The ROI should be present in the `self.ptychographs` dictionary.
-            hot_pixels (bool, optional): If True, the method will mask hot pixels in the ROI data. 
-                                         Default is True.
-            mask_val (int, optional): The value to use for masking. Currently not used in the function. 
-                                      Default is 1.
-    
-        Updates:
-            The `self.ptychographs` dictionary with the masked data for the specified ROI, 
-            after applying the hot pixel mask (if `hot_pixels` is True).
-        """
-        if hot_pixels:
-            self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], mask_coh_img=self.mask_coh_img)
-            
-    def plot_average_roi(self, roi_name, vmin=None, vmax=None, title=None):
-        """Plots the averaged frames for the specified region of interest (ROI).
-
-        This method displays the averaged data for a given ROI by plotting the mean of 
-        the frames stored in `self.averaged_data`. The plot is displayed using the 
-        `plot_roi_from_numpy` function.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) whose averaged data 
-                             is to be plotted. The averaged data should be stored in 
-                             `self.averaged_data`.
-            vmin (float, optional): The minimum value for the color scale. If None, 
-                                     the minimum of the data is used. Default is None.
-            vmax (float, optional): The maximum value for the color scale. If None, 
-                                     the maximum of the data is used. Default is None.
-            title (str, optional): The title of the plot. If None, a default title is used. 
-                                   Default is None.
-    
-        Displays:
-            A plot of the averaged frames for the specified ROI, with the given color scale.
-        """
-        
-        plot_roi_from_numpy(self.averaged_data[roi_name], [0,-1,0,-1], f"Averaged Frames for {roi_name}", vmin=vmin, vmax=vmax )
-
-    @time_it
-    def make_coherent_images(self, roi_name):
-        
-        """
-        Generates a list of coherent images for a given region of interest (ROI).
-
-        This method creates coherent images by processing the coordinates of the specified 
-        ROI and calling the `make_coherent_image` function for each coordinate. The results 
-        are stored in `self.coherent_imgs` for further use.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) for which the coherent 
-                             images will be generated. The coordinates for the ROI are 
-                             retrieved from `self.coords[roi_name]`, and the corresponding 
-                             ptychographic data is accessed from `self.ptychographs[roi_name]`.
-    
-        """
-        
-        coherent_imgs = []
-        for i, coord in enumerate(self.coords[roi_name]):
-            
-            
-            xp =  coord[0] - self.rois_dict[roi_name][0]
-            yp =  coord[1] - self.rois_dict[roi_name][2]
-
-            coh_img = make_coherent_image(self.ptychographs[roi_name], np.array([xp,yp]))
-
-            coherent_imgs.append(coh_img)
-
-        self.coherent_imgs[roi_name] = np.array(coherent_imgs)
-        
-    def even_dims_cohimages(self, roi_name):
-        """Adjusts the dimensions of coherent images to be even.
-
-        This method takes the coherent images for a given region of interest (ROI) 
-        and ensures that their dimensions are even by calling the `make_2dimensions_even` function.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) for which the coherent 
-                             images will have their dimensions adjusted. The coherent images 
-                             are accessed from `self.coherent_imgs[roi_name]`.
-    
-        """
-        
-        self.coherent_imgs[roi_name] = make_2dimensions_even(self.coherent_imgs[roi_name])
-        
-    def filter_coherent_images(self, roi_name:str, variance_threshold):
-        """Filters coherent images based on variance threshold.
-
-        This method filters out noisy or low-variance coherent images for a given 
-        region of interest (ROI) by using a variance threshold. It removes images 
-        with variance below the specified threshold and updates the coherent images, 
-        coordinates, and kx, ky values accordingly.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) for which the 
-                             coherent images will be filtered.
-            variance_threshold (float): The threshold value for variance. Images with 
-                                        variance below this threshold will be filtered out.
-    
-        """
-        
-        cleaned_coh_images, cleaned_coords, cleaned_kxky = filter_images(self.coherent_imgs[roi_name], 
-                                                                         coords = self.coords[roi_name],
-                                                                         kin_coords=self.kouts[roi_name], 
-                                                                         variance_threshold = variance_threshold)
-    
-
-        self.coherent_imgs[roi_name] = cleaned_coh_images
-        self.kouts[roi_name] = cleaned_kxky
-        self.coords[roi_name] = cleaned_coords
-        
     def plot_averag_coh_imgs(self, roi_name, vmin=None, vmax=None, title=None):
         """Plots the average of coherent images for a given region of interest (ROI).
 
@@ -529,163 +751,6 @@ class load_data:
             title = f"Average Coherent Images {roi_name}"
             
         plot_roi_from_numpy(avg, name=title, vmin=vmin, vmax=vmax)
-    
-    def make_kvector(self, roi_name, mask_val):
-        """Computes the k-space vectors for a given region of interest (ROI).
-
-        This method calculates the pixel coordinates and k-space vectors for a specified 
-        region of interest (ROI) using the averaged data. It uses the given mask value 
-        to filter out unwanted pixels and computes the k-space vectors based on the 
-        coordinates, detector distance, pixel size, center pixel, and wavelength.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) for which the 
-                             k-space vectors are to be computed.
-            mask_val (float): The value used for masking pixels during coordinate 
-                              computation.
-    
-        """
-        self.coords[roi_name] = make_coordinates(self.averaged_data[roi_name], mask_val, self.rois_dict[roi_name], crop=False)
-        self.kouts[roi_name] = compute_vectors(self.coords[roi_name], self.det_distance, self.det_psize, self.centre_pixel, self.wavelength)
-
-    def pool_detector_space(self, roi_name, kernel_size, stride=None, padding=0):
-        """Performs pooling on the detector space for a given region of interest (ROI).
-
-        This method applies a 2D sum pooling operation on the ptychograph data of a 
-        specific region of interest (ROI). It reduces the spatial resolution of the 
-        detector space by pooling with a given kernel size, stride, and padding. 
-        If the stride is not provided, it will default to the kernel size.
-
-        The efective detector pixel is modified accordingly.
-        
-        Args:
-            roi_name (str): The name of the region of interest (ROI) to be processed.
-            kernel_size (int): The size of the pooling kernel, determining the window 
-                                over which the sum pooling is applied.
-            stride (int, optional): The stride of the pooling operation, i.e., the 
-                                     step size between each pooling operation. If 
-                                     not provided, defaults to `kernel_size`.
-            padding (int, optional): The amount of zero padding to add around the 
-                                      edges of the image before pooling. Defaults to 0.
-        """
-        
-        self.ptychographs[roi_name] = sum_pool2d_array(self.ptychographs[roi_name], kernel_size=kernel_size, stride=stride, padding=padding)
-        if stride is None:
-            self.det_psize *= kernel_size
-        else:
-            self.det_psize *= stride
-            
-    def remove_coh_background(self, roi_name, sigma):
-        """Removes the background noise from coherent images for a given region of interest (ROI).
-
-        This method applies a background removal technique to the coherent images 
-        of a specific region of interest (ROI) using a Gaussian filter with a given 
-        standard deviation (sigma). The process helps to reduce unwanted background 
-        noise in the coherent images, improving the signal-to-noise ratio.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) whose coherent 
-                             images will be processed.
-            sigma (float): The standard deviation of the Gaussian filter used for 
-                           background removal. A higher value will smooth the image 
-                           more, removing more background noise but potentially 
-                           blurring fine details.
-        """
-        
-        self.coherent_imgs[roi_name] = remove_background_parallel(self.coherent_imgs[roi_name], sigma=sigma)
-
-    def filter_by_median(self, roi_name, kernel_size, stride, threshold):
-        """Applies a median filter to coherent images for a given region of interest (ROI).
-
-        This method applies a median filter to the coherent images of a specified 
-        region of interest (ROI). The filter helps to remove noise and outliers by 
-        replacing each pixel's value with the median of its neighbors within a 
-        specified kernel. The filter can also apply a threshold to the pixel values 
-        for further noise reduction. The filtering is done in parallel using multiple 
-        CPU cores to speed up the process.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) whose coherent 
-                             images will be processed.
-            kernel_size (int): The size of the square kernel to be used for the 
-                                median filter. A larger kernel size will result in 
-                                stronger smoothing.
-            stride (int): The step size for applying the kernel across the image. 
-                           A higher stride will apply the filter less frequently.
-            threshold (float): The threshold value used to filter out small intensity 
-                               variations, helping to remove noise and improve the 
-                               quality of the coherent images.
-        """
-        self.coherent_imgs[roi_name] = median_filter_parallel(self.coherent_imgs[roi_name], 
-                                                              kernel_size = kernel_size, 
-                                                              stride = stride, 
-                                                              threshold=threshold, 
-                                                              n_jobs=32)
-
-    def filter_by_bilateral(self, roi_name, sigma_spatial, sigma_range, kernel_size):
-        """Applies a bilateral filter to the coherent images for a given region of interest (ROI).
-
-        This method applies a bilateral filter to the coherent images of a specified 
-        region of interest (ROI). The bilateral filter smooths the image while preserving 
-        edges by considering both spatial proximity and intensity similarity. It uses 
-        two parameters: `sigma_spatial` controls the spatial smoothing, and `sigma_range` 
-        controls the intensity smoothing. The kernel size defines the size of the neighborhood 
-        for the filter.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) whose coherent 
-                             images will be processed.
-            sigma_spatial (float): The standard deviation of the spatial Gaussian filter. 
-                                   Larger values result in greater spatial smoothing.
-            sigma_range (float): The standard deviation of the range (intensity) Gaussian 
-                                 filter. Larger values preserve more intensity variation.
-            kernel_size (int): The size of the square kernel to be used for the bilateral 
-                            filter. A larger kernel size will result in stronger filtering.
-    """
-        self.coherent_images[roi_name] = bilateral_filter_parallel(self.coherent_images[roi_name], sigma_spatial, sigma_range, kernel_size)
-    
-    def blur_detected_objs(self, roi_name, sigma):
-        """Applies Gaussian blur to the detected objects in the specified region of interest (ROI).
-
-        This method applies a Gaussian blur to the images of detected objects within a 
-        given region of interest (ROI). The blur is controlled by the `sigma` parameter, 
-        which determines the standard deviation of the Gaussian kernel. A larger `sigma` 
-        results in a stronger blur.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) whose detected object 
-                             images will be blurred.
-            sigma (float): The standard deviation of the Gaussian filter. Larger values 
-                           result in more blurring.
-    
-        """
-        self.images_object[roi_name] = apply_gaussian_blur(self.images_object[roi_name], sigma=sigma)
-    
-    
-    def detect_object(self, roi_name, threshold, min_val, max_val):
-        """Detects objects within the specified region of interest (ROI) and filters based on intensity.
-
-        This method applies an object detection algorithm to the coherent images in the given 
-        region of interest (ROI), based on a specified intensity threshold. The detected objects 
-        are then filtered based on their total intensity being within the specified `min_val` 
-        and `max_val` range. Only objects that meet these criteria are retained.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) to process.
-            threshold (float): The intensity threshold for object detection. Objects with intensity 
-                               below this threshold will not be detected.
-            min_val (float): The minimum intensity threshold for filtering detected objects.
-            max_val (float): The maximum intensity threshold for filtering detected objects.
-    
-        """
-        self.images_object[roi_name] = detect_obj_parallel(self.coherent_imgs[roi_name], threshold=threshold)
-        mask = [np.sum(im) > min_val and np.sum(im) < max_val for im in self.images_object[roi_name]]
-
-        
-        self.coherent_imgs[roi_name] = np.array(self.coherent_imgs[roi_name])[mask]
-        self.kouts[roi_name] = np.array(self.kouts[roi_name])[mask]
-        self.coords[roi_name] = np.array(self.coords[roi_name])[mask]
-        
     def plot_detected_objects(self, roi_name):
         """Displays the detected objects in coherent images with a slider for navigation.
 
@@ -728,34 +793,20 @@ class load_data:
 
         display(interactive_plot)  # Show slider
         #display(fig)  # Display the figure
+    def plot_pixel_space(self,roi_name, connection=False):
+        """Plots the pixel space of the given region of interest (ROI) using k-vectors.
 
-    def normalise_detector(self, roi_name_ref, roi_name_op):
-        """Normalizes the detector data based on the reference ROI's peak intensity.
-
-        This method normalizes the ptychograph data for a given ROI (region of interest) 
-        by scaling the intensity of the detector data from a reference ROI. The normalization 
-        is performed by adjusting the intensity of the operating ROI to match the average 
-        intensity of the reference ROI.
-    
-        If the ptychograph data for the reference ROI is not already available, it is 
-        loaded from the specified directory, and any hot pixels are masked before proceeding.
+        This method visualizes the pixel space of a specific ROI by plotting its k-vectors.
+        Optionally, the method can show the connections between the pixels, depending on the 
+        `connection` argument.
     
         Args:
-            roi_name_ref (str): The name of the reference region of interest (ROI) used 
-                                 for calculating the peak intensity.
-            roi_name_op (str): The name of the operating region of interest (ROI) to be normalized.
+            roi_name (str): The name of the region of interest (ROI) to plot.
+            connection (bool, optional): Whether to display connections between the pixels.
+                                         Defaults to False.
     
         """
-        try:
-            peak_intensity = np.sum(self.ptychographs[roi_name_ref], axis=(-2,-1))
-        except: 
-            self.ptychographs[roi_name_ref] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name_ref], conc=True)
-            self.ptychographs[roi_name_ref] = mask_hot_pixels(self.ptychographs[roi_name_ref])
-            peak_intensity = np.sum(self.ptychographs[roi_name_ref], axis=(-2,-1))
-        
-        avg_intensity = np.mean(peak_intensity)
-        self.ptychographs[roi_name_op] = self.ptychographs[roi_name_op]/peak_intensity[...,np.newaxis, np.newaxis] * avg_intensity
-
+        plot_pixel_space(self.kouts[roi_name], connection=connection)
     def plot_intensity_histograms(self, roi_name, bins = 256):
         """Displays intensity histograms of images in a given ROI and allows scrolling through them via a slider.
 
@@ -799,123 +850,69 @@ class load_data:
         interactive_plot = widgets.interactive(update_image, img_idx=img_slider)
         
         display(interactive_plot)  # Show slider
-    
-    def mask_cohimgs_threshold(self, roi_name, threshold_value):
-        """Applies a threshold mask to the coherent images in the given ROI.
+    def plot_average_roi(self, roi_name, vmin=None, vmax=None, title=None):
+        """Plots the averaged frames for the specified region of interest (ROI).
 
-        This method thresholds the coherent images for the specified region of interest (ROI) 
-        by applying a threshold value. Any values below the threshold will be masked or set 
-        to zero, and values above the threshold will remain unchanged.
+        This method displays the averaged data for a given ROI by plotting the mean of 
+        the frames stored in `self.averaged_data`. The plot is displayed using the 
+        `plot_roi_from_numpy` function.
     
         Args:
-            roi_name (str): The name of the region of interest (ROI) whose coherent images 
-                             will be thresholded.
-            threshold_value (float): The threshold value used for masking the coherent images. 
-                                      Values below this threshold will be masked.
+            roi_name (str): The name of the region of interest (ROI) whose averaged data 
+                             is to be plotted. The averaged data should be stored in 
+                             `self.averaged_data`.
+            vmin (float, optional): The minimum value for the color scale. If None, 
+                                     the minimum of the data is used. Default is None.
+            vmax (float, optional): The maximum value for the color scale. If None, 
+                                     the maximum of the data is used. Default is None.
+            title (str, optional): The title of the plot. If None, a default title is used. 
+                                   Default is None.
     
+        Displays:
+            A plot of the averaged frames for the specified ROI, with the given color scale.
         """
-        self.coherent_imgs[roi_name] = threshold_data(gold.coherent_imgs[roi_name], threshold_value)
-    
-    def mask_region_cohimgs(self, roi_name, region, mode = 'zeros'):
-        """Masks a specific region of coherent images within the given ROI.
+        
+        plot_roi_from_numpy(self.averaged_data[roi_name], [0,-1,0,-1], f"Averaged Frames for {roi_name}", vmin=vmin, vmax=vmax )
+    def plot_detector_roi(self, roi_name, file_no, frame_no, title=None, vmin=None, vmax=None,mask_hot = False, save=False):
+        """Plots a region of interest (ROI) on the detector for a given frame.
 
-        This method applies a median mask to a specified region within the coherent images 
-        of a particular region of interest (ROI). The region is defined by the `region` argument, 
-        which specifies the start and end indices for both the x and y dimensions. The region is 
-        replaced by the median value of the corresponding region across all images.
+        This method retrieves a specific ROI from the detector data and visualizes it.
+        It supports optional hot pixel masking and saving of the generated plot.
     
         Args:
-            roi_name (str): The name of the region of interest (ROI) whose coherent images 
-                             will be modified.
-            region (tuple): A tuple (sx, ex, sy, ey) specifying the start and end indices 
-                            for the region to be masked:
-                            - sx, ex: x-axis start and end indices
-                            - sy, ey: y-axis start and end indices
-            mode (str, optional): A string specifying how to replace the masked region. 
-                            - 'zeros'. Default.
-                            - 'median'
-                            - 'ones'
+            roi_name (str): The name of the region of interest (ROI) to be plotted.
+            file_no (int): The file number to retrieve the frame from.
+            frame_no (int): The frame number within the specified file.
+            title (str, optional): The title of the plot. Defaults to an auto-generated title.
+            vmin (float, optional): Minimum intensity value for visualization. Defaults to None.
+            vmax (float, optional): Maximum intensity value for visualization. Defaults to None.
+            mask_hot (bool, optional): Whether to apply hot pixel masking. Defaults to False.
+            save (bool, optional): Whether to save the plotted image. Defaults to False.
+    
+        Raises:
+            KeyError: If the specified ROI name is not found in `self.rois_dict`.
+    
+        Displays:
+            A plot of the selected ROI on the detector.
         """
-        sx,ex,sy,ey = region
-        self.coherent_imgs[roi_name] = np.array(self.coherent_imgs[roi_name])
-        if mode == 'zeros':
-            self.coherent_imgs[roi_name][:,sx:ex,sy:ey] = 0.0
-        elif mode == 'median':
-            self.coherent_imgs[roi_name][:,sx:ex,sy:ey] = np.median(self.coherent_imgs[roi_name], axis = (1,2))[:,np.newaxis, np.newaxis]
-        elif mode == 'ones':
-            self.coherent_imgs[roi_name][:,sx:ex,sy:ey] = 1.0
+        
+        if self.beamtime == 'new':
+            file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
             
-    def mask_region_detector(self, roi_name, region, mode = 'zeros'):
-        """Masks a specific region of the detector data within the given ROI.
+            file_name = self.dir+f'Scan_{self.scan_num}_data_{file_no_st}.h5'
+    
+            with h5py.File(file_name,'r') as f:
+                data_test = f['/entry/data/data'][frame_no,:,:]
+        else:
+            data_test = stack_4d_data_old(self.dir, self.rois_dict[roi_name], self.fast_axis_steps, self.slow_axis)[file_no,frame_no, :,:]
 
-        This method applies a median mask to a specified region within the detector data 
-        (ptychographs) of a particular region of interest (ROI). The region is defined by the 
-        `region` argument, which specifies the start and end indices for both the x and y 
-        dimensions. The region is replaced by the median value of the corresponding region 
-        across all detector data.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) whose detector data 
-                             will be modified.
-            region (tuple): A tuple (sx, ex, sy, ey) specifying the start and end indices 
-                            for the region to be masked:
-                            - sx, ex: x-axis start and end indices
-                            - sy, ey: y-axis start and end indices
-            mode (str, optional): A string specifying how to replace the masked region. 
-                            - 'zeros'. Default.
-                            - 'median'
-                            - 'ones'
-        """
-        sx,ex,sy,ey = region
-        if mode == 'zeros':
-            self.ptychographs[roi_name][:,:,sx:ex,sy:ey] = 0.0
-        elif mode == 'median':
-            self.ptychographs[roi_name][:,:,sx:ex,sy:ey] = np.median(self.ptychographs[roi_name], axis = (2,3))[:,:,np.newaxis, np.newaxis]
-        elif mode == 'ones':
-            self.ptychographs[roi_name][:,:,sx:ex,sy:ey] = 1.0
-        
+        if mask_hot:
 
-    def order_pixels(self, roi_name):
-        """Reorders the pixels of coherent images and corresponding k-vectors based on their distance from the center.
-    
-        This method reorders the coherent images and updates the corresponding k-vectors
-        based on their distance from the center. The reordering is done to facilitate specific analysis or
-        visualization by aligning the data in a certain order.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) for which the pixels 
-                             and k-vectors will be reordered.
-        """
-        self.kouts[roi_name], self.coherent_imgs[roi_name] = reorder_pixels_from_center(self.kouts[roi_name], connected_array=np.array(self.coherent_imgs[roi_name]))
-
-    def plot_pixel_space(self,roi_name, connection=False):
-        """Plots the pixel space of the given region of interest (ROI) using k-vectors.
-
-        This method visualizes the pixel space of a specific ROI by plotting its k-vectors.
-        Optionally, the method can show the connections between the pixels, depending on the 
-        `connection` argument.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) to plot.
-            connection (bool, optional): Whether to display connections between the pixels.
-                                         Defaults to False.
-    
-        """
-        plot_pixel_space(self.kouts[roi_name], connection=connection)
-
-    def align_coherent_images(self, roi_name):
-        """Aligns a list of coherent images for a given region of interest (ROI).
-
-        This method uses the first image in the list as a reference and aligns the subsequent 
-        images in the list by applying phase correlation to estimate and correct the shifts.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) whose coherent images
-                             will be aligned.
-    
-        """
-        self.coherent_imgs[roi_name] = align_images(self.coherent_imgs[roi_name])
-        
+            data_test = mask_hot_pixels(data_test)
+        if title is None:
+            title = f"Detector image at {roi_name} in Frame ({file_no}, {frame_no})"
+        plot_roi_from_numpy(data_test, self.rois_dict[roi_name], title, vmin=vmin, vmax=vmax, save = save)
+    ################### Prepares the data ###################
     def prepare_roi(self, roi_name:str, 
                     mask_val: float, 
                     mask_max_coh:bool = False,
@@ -950,7 +947,7 @@ class load_data:
         if pool_det is not None:
             self.pool_detector_space(roi_name, *pool_det)
         self.average_frames_roi(roi_name=roi_name)
-        self.make_kvector(roi_name=roi_name,mask_val= mask_val)
+        self.make_kouts(roi_name=roi_name,mask_val= mask_val)
         
     def prepare_coherent_images(self, roi_name:str, 
                                 mask_region = None,
@@ -1008,10 +1005,10 @@ class load_data:
         
         self.even_dims_cohimages(roi_name=roi_name)
         if median_params is not None:
-            self.filter_by_median(roi_name, *median_params)
+            self.apply_median_filter(roi_name, *median_params)
 
         if bilateral_params is not None:
-            self.filter_by_bilateral(roi_name, *bilateral_params)
+            self.apply_bilateral_filter(roi_name, *bilateral_params)
             
         if detect_params is not None:
             self.detect_object(roi_name, *detect_params)

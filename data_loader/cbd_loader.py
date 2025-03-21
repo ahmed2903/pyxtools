@@ -911,7 +911,7 @@ class load_data:
             data_test = mask_hot_pixels(data_test)
         if title is None:
             title = f"Detector image at {roi_name} in Frame ({file_no}, {frame_no})"
-        plot_roi_from_numpy(data_test, [0,-1,0,-1], title, vmin=vmin, vmax=vmax, save = save)
+        plot_roi_from_numpy(data_test, self.rois_dict[roi_name], title, vmin=vmin, vmax=vmax, save = save)
     ################### Prepares the data ###################
     def prepare_roi(self, roi_name:str, 
                     mask_val: float, 
