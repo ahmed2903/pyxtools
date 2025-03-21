@@ -195,7 +195,7 @@ class load_data:
         
     
     def add_roi(self, roi_name:str , roi:list):
-         """Adds a region of interest (ROI) to the dictionary.
+        """Adds a region of interest (ROI) to the dictionary.
 
         This method stores an ROI with its name and coordinates in the `rois_dict` dictionary.
         The coordinates are given as a list [xstart, xend, ystart, yend].
@@ -430,7 +430,8 @@ class load_data:
         Displays:
             A plot of the averaged frames for the specified ROI, with the given color scale.
         """
-            plot_roi_from_numpy(self.averaged_data[roi_name], [0,-1,0,-1], f"Averaged Frames for {roi_name}", vmin=vmin, vmax=vmax )
+        
+        plot_roi_from_numpy(self.averaged_data[roi_name], [0,-1,0,-1], f"Averaged Frames for {roi_name}", vmin=vmin, vmax=vmax )
 
     @time_it
     def make_coherent_images(self, roi_name):
@@ -815,7 +816,7 @@ class load_data:
         """
         self.coherent_imgs[roi_name] = threshold_data(gold.coherent_imgs[roi_name], threshold_value)
     
-    def mask_region_cohimgs(self, roi_name, region):
+    def mask_region_cohimgs(self, roi_name, region, mode = 'zeros'):
         """Masks a specific region of coherent images within the given ROI.
 
         This method applies a median mask to a specified region within the coherent images 
@@ -830,13 +831,21 @@ class load_data:
                             for the region to be masked:
                             - sx, ex: x-axis start and end indices
                             - sy, ey: y-axis start and end indices
-    
+            mode (str, optional): A string specifying how to replace the masked region. 
+                            - 'zeros'. Default.
+                            - 'median'
+                            - 'ones'
         """
         sx,ex,sy,ey = region
         self.coherent_imgs[roi_name] = np.array(self.coherent_imgs[roi_name])
-        self.coherent_imgs[roi_name][:,sx:ex,sy:ey] = np.median(self.coherent_imgs[roi_name], axis = (1,2))[:,np.newaxis, np.newaxis]
-
-    def mask_region_detector(self, roi_name, region):
+        if mode == 'zeros':
+            self.coherent_imgs[roi_name][:,sx:ex,sy:ey] = 0.0
+        elif mode == 'median':
+            self.coherent_imgs[roi_name][:,sx:ex,sy:ey] = np.median(self.coherent_imgs[roi_name], axis = (1,2))[:,np.newaxis, np.newaxis]
+        elif mode == 'ones':
+            self.coherent_imgs[roi_name][:,sx:ex,sy:ey] = 1.0
+            
+    def mask_region_detector(self, roi_name, region, mode = 'zeros'):
         """Masks a specific region of the detector data within the given ROI.
 
         This method applies a median mask to a specified region within the detector data 
@@ -852,9 +861,19 @@ class load_data:
                             for the region to be masked:
                             - sx, ex: x-axis start and end indices
                             - sy, ey: y-axis start and end indices
+            mode (str, optional): A string specifying how to replace the masked region. 
+                            - 'zeros'. Default.
+                            - 'median'
+                            - 'ones'
         """
         sx,ex,sy,ey = region
-        self.ptychographs[roi_name][:,:,sx:ex,sy:ey] = np.median(self.ptychographs[roi_name], axis = (2,3))[:,:,np.newaxis, np.newaxis]
+        if mode == 'zeros':
+            self.ptychographs[roi_name][:,:,sx:ex,sy:ey] = 0.0
+        elif mode == 'median':
+            self.ptychographs[roi_name][:,:,sx:ex,sy:ey] = np.median(self.ptychographs[roi_name], axis = (2,3))[:,:,np.newaxis, np.newaxis]
+        elif mode == 'ones':
+            self.ptychographs[roi_name][:,:,sx:ex,sy:ey] = 1.0
+        
 
     def order_pixels(self, roi_name):
         """Reorders the pixels of coherent images and corresponding k-vectors based on their distance from the center.
