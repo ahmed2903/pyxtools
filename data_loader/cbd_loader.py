@@ -12,15 +12,20 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from matplotlib.widgets import Button, TextBox
 from matplotlib.patches import Rectangle
-import ipywidgets as widgets
+
+    
 from IPython.display import display
 import concurrent
 
 from ..data_fs import * 
-from ..xrays_fs import compute_vectors
-from  ..plotting_fs import plot_roi_from_numpy, plot_pixel_order
+from ..xrays_fs import compute_vectors, optimise_kin, objective_function, reverse_kins_to_pixels
+from  ..plotting_fs import plot_roi_from_numpy
 from ..utils import time_it
-
+try:
+    import ipywidgets as widgets
+except:
+    print("ipywdigets wont work outisde jupyter notebook")
+    
 class load_data:
     """
     Class for loading and organizing experimental scan data.
@@ -68,8 +73,10 @@ class load_data:
         self.ptychographs = {}
         self.averaged_data = {}
         self.images_object = {}
-        self.coords = {}
+        self.kout_coords = {}
         self.kouts = {}
+        self.kins = {}
+        self.kin_coords = {}
         self.coherent_imgs = {}
         
         if self.beamtime == 'new':
@@ -157,23 +164,7 @@ class load_data:
         """
         if hot_pixels:
             self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], mask_coh_img=self.mask_coh_img)
-    def make_kvector(self, roi_name, mask_val):
-        """Computes the k-space vectors for a given region of interest (ROI).
-
-        This method calculates the pixel coordinates and k-space vectors for a specified 
-        region of interest (ROI) using the averaged data. It uses the given mask value 
-        to filter out unwanted pixels and computes the k-space vectors based on the 
-        coordinates, detector distance, pixel size, center pixel, and wavelength.
     
-        Args:
-            roi_name (str): The name of the region of interest (ROI) for which the 
-                             k-space vectors are to be computed.
-            mask_val (float): The value used for masking pixels during coordinate 
-                              computation.
-    
-        """
-        self.coords[roi_name] = make_coordinates(self.averaged_data[roi_name], mask_val, self.rois_dict[roi_name], crop=False)
-        self.kouts[roi_name] = compute_vectors(self.coords[roi_name], self.det_distance, self.det_psize, self.centre_pixel, self.wavelength)
     def pool_detector_space(self, roi_name, kernel_size, stride=None, padding=0):
         """Performs pooling on the detector space for a given region of interest (ROI).
 
@@ -254,6 +245,39 @@ class load_data:
             self.ptychographs[roi_name][:,:,sx:ex,sy:ey] = np.median(self.ptychographs[roi_name], axis = (2,3))[:,:,np.newaxis, np.newaxis]
         elif mode == 'ones':
             self.ptychographs[roi_name][:,:,sx:ex,sy:ey] = 1.0
+    
+    
+    ################### Compute k_in vectors ###################
+    
+    def make_kouts(self, roi_name, mask_val):
+        """Computes the k-space vectors for a given region of interest (ROI).
+
+        This method calculates the pixel coordinates and k-space vectors for a specified 
+        region of interest (ROI) using the averaged data. It uses the given mask value 
+        to filter out unwanted pixels and computes the k-space vectors based on the 
+        coordinates, detector distance, pixel size, center pixel, and wavelength.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) for which the 
+                             k-space vectors are to be computed.
+            mask_val (float): The value used for masking pixels during coordinate 
+                              computation.
+    
+        """
+        self.kout_coords[roi_name] = make_coordinates(self.averaged_data[roi_name], mask_val, self.rois_dict[roi_name], crop=False)
+        self.kouts[roi_name] = compute_vectors(self.kout_coords[roi_name], self.det_distance, self.det_psize, self.centre_pixel, self.wavelength)
+        
+    def compute_kins(self, roi_name, est_ttheta, method = "BFGS", gtol = 1e-6):
+        
+        try:
+            g_init = np.mean(self.kouts["pupil"], axis = 0)
+        except:
+            raise ValueError("Must compute pupil kouts first")
+        
+        self.kins[roi_name], _ = optimise_kin(g_init, est_ttheta, self.kouts[roi_name], self.wavelength, method, gtol)
+        
+        self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], self.det_psize, self.det_distance, self.centre_pixel)
+        
     ################### preprocessing coherent images ###################
     @time_it
     def make_coherent_images(self, roi_name):
@@ -268,13 +292,13 @@ class load_data:
         Args:
             roi_name (str): The name of the region of interest (ROI) for which the coherent 
                              images will be generated. The coordinates for the ROI are 
-                             retrieved from `self.coords[roi_name]`, and the corresponding 
+                             retrieved from `self.kout_coords[roi_name]`, and the corresponding 
                              ptychographic data is accessed from `self.ptychographs[roi_name]`.
     
         """
         
         coherent_imgs = []
-        for i, coord in enumerate(self.coords[roi_name]):
+        for i, coord in enumerate(self.kout_coords[roi_name]):
             
             
             xp =  coord[0] - self.rois_dict[roi_name][0]
@@ -301,15 +325,15 @@ class load_data:
     
         """
         
-        cleaned_coh_images, cleaned_coords, cleaned_kxky = filter_images(self.coherent_imgs[roi_name], 
-                                                                         coords = self.coords[roi_name],
+        cleaned_coh_images, cleaned_kins, cleaned_kxky = filter_images(self.coherent_imgs[roi_name], 
+                                                                         coords = self.kins[roi_name],
                                                                          kin_coords=self.kouts[roi_name], 
                                                                          variance_threshold = variance_threshold)
     
 
         self.coherent_imgs[roi_name] = cleaned_coh_images
         self.kouts[roi_name] = cleaned_kxky
-        self.coords[roi_name] = cleaned_coords
+        self.kins[roi_name] = cleaned_kins
     def remove_coh_background(self, roi_name, sigma):
         """Removes the background noise from coherent images for a given region of interest (ROI).
 
@@ -355,7 +379,6 @@ class load_data:
                              and k-vectors will be reordered.
         """
         self.kouts[roi_name], self.coherent_imgs[roi_name] = reorder_pixels_from_center(self.kouts[roi_name], connected_array=np.array(self.coherent_imgs[roi_name]))
-
     
     def apply_median_filter(self, roi_name, kernel_size, stride, threshold):
         """Applies a median filter to coherent images for a given region of interest (ROI).
@@ -427,7 +450,7 @@ class load_data:
         
         self.coherent_imgs[roi_name] = np.array(self.coherent_imgs[roi_name])[mask]
         self.kouts[roi_name] = np.array(self.kouts[roi_name])[mask]
-        self.coords[roi_name] = np.array(self.coords[roi_name])[mask]
+        self.kins[roi_name] = np.array(self.kins[roi_name])[mask]
     def blur_detected_objs(self, roi_name, sigma):
         """Applies Gaussian blur to the detected objects in the specified region of interest (ROI).
 
@@ -924,7 +947,7 @@ class load_data:
         if pool_det is not None:
             self.pool_detector_space(roi_name, *pool_det)
         self.average_frames_roi(roi_name=roi_name)
-        self.make_kvector(roi_name=roi_name,mask_val= mask_val)
+        self.make_kouts(roi_name=roi_name,mask_val= mask_val)
         
     def prepare_coherent_images(self, roi_name:str, 
                                 mask_region = None,
