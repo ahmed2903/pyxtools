@@ -2,9 +2,7 @@ import numpy as np
 import torch
 from numpy.fft import fftshift, ifftshift, fft2, ifft2
 
-from .utils_pr import *
-from .data_fs import upsample_images
-
+from utils_pr import *
 
 
 def fourier_ptychography_reconstruction(images, kout_vec, 

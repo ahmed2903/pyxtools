@@ -557,28 +557,7 @@ def remove_background_parallel(image_list, sigma=20, n_jobs = 8):
     result = Parallel(n_jobs=n_jobs)(delayed(remove_background)(im, sigma) for im in image_list)
     return result
     
-def upsample_image(im, zoom_factor):
-    """
-    Upsample a single image using zoom.
-    """
-    return zoom(im, zoom_factor, order=3).astype(complex)
 
-def upsample_images(images, zoom_factor, n_jobs=4):
-    """
-    Upsample a list of images in parallel.
-
-    Parameters:
-        images (list of numpy.ndarray): List of input images.
-        zoom_factor (float or tuple): Zoom factor for upsampling.
-        n_jobs (int): Number of CPU cores to use. Default is -1 (use all available cores).
-
-    Returns:
-        numpy.ndarray: Array of upsampled images.
-    """
-    # Use joblib to parallelize the upsampling
-    up_images = Parallel(n_jobs=n_jobs)(delayed(upsample_image)(im, zoom_factor) for im in images)
-
-    return np.array(up_images)
 
 def detect_object(image, threshold_factor=0.5):
     """Detects the object by thresholding and finding the largest connected component."""
@@ -672,48 +651,7 @@ def median_filter_parallel(images, kernel_size, stride, threshold, n_jobs=32):
     return filtered_images
 
 
-def pad_to_double(img):
-    """
-    Pads each 2D numpy array in a list to double its size.
-    The original image will be centered in the padded output.
-    
-    Args:
-        image_list: List of 2D numpy arrays
-        
-    Returns:
-        List of padded 2D numpy arrays, each with double the dimensions
-    """
-    
-    # Get original dimensions
-    h, w = img.shape
-    
-    # Calculate padding for each side
-    pad_h = h // 2
-    pad_w = w // 2
-    
-    # Pad the image with zeros
-    padded_img = np.pad(img, ((pad_h, pad_h), (pad_w, pad_w)), mode='constant', constant_values=0)
-    
-    return padded_img
 
-@time_it
-def pad_to_double_parallel(image_list, n_jobs=8):
-    """
-    Slices the center of each 2D numpy array in a list,
-    keeping only half the size in each dimension.
-    
-    Args:
-        image_list: List of 2D numpy arrays
-        
-    Returns:
-        List of center-sliced 2D numpy arrays, each with half the dimensions
-    """
-    # Use joblib to parallelize the median filter application
-    padded_images = Parallel(n_jobs=n_jobs)(
-        delayed(pad_to_double)(image) for image in image_list
-    
-    )
-    return padded_images
 
 
 def exctract_centres_parallel(image_list, n_jobs=8):
@@ -823,20 +761,7 @@ def apply_gaussian_blur(arrays, sigma=1):
     blurred_objects = [gaussian_filter(arr, sigma=sigma) for arr in arrays]
     return blurred_objects
 
-def make_dims_even(size_tuple):
-    """
-    Takes a tuple of (x, y) and ensures both values are even.
-    If a value is odd, it's increased by 1 to make it even.
-    """
-    x, y = size_tuple
-    
-    if x % 2 != 0:
-        x += 1
-        
-    if y % 2 != 0:
-        y += 1
-        
-    return (x, y)
+
 
 def compute_histograms(image_list, bins=256):
     """
@@ -902,8 +827,9 @@ def bilateral_filter_parallel(image_list, sigma_spatial=3, sigma_range=50, kerne
 
     # Use joblib to parallelize the median filter application
     padded_images = Parallel(n_jobs=n_jobs)(
-        delayed(pad_to_double)(image, sigma_spatial,sigma_range,kernel_size) for image in image_list)
+        delayed(bilateral_filter)(image, sigma_spatial,sigma_range,kernel_size) for image in image_list)
     return padded_images
+
 @time_it
 def reorder_pixels_from_center(pixel_coords, connected_array=None):
     """

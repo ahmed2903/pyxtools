@@ -9,18 +9,17 @@ import h5py
 import matplotlib.pyplot as plt
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from matplotlib.widgets import Button, TextBox
+
 from matplotlib.patches import Rectangle
 
     
 from IPython.display import display
 import concurrent
 
-from ..data_fs import * 
-from ..xrays_fs import compute_vectors, optimise_kin, objective_function, reverse_kins_to_pixels
-from  ..plotting_fs import plot_roi_from_numpy
-from ..utils import time_it
+from data_fs import * 
+from kvectors import compute_vectors, optimise_kin, reverse_kins_to_pixels
+from  plotting import plot_roi_from_numpy, plot_pixel_space
+from utils import time_it
 try:
     import ipywidgets as widgets
 except:
@@ -270,10 +269,12 @@ class load_data:
     def compute_kins(self, roi_name, est_ttheta, method = "BFGS", gtol = 1e-6):
         
         try:
-            g_init = np.mean(self.kouts["pupil"], axis = 0)
+            kins_avg = np.mean(self.kouts["pupil"], axis = 0, keepdims = True )
         except:
             raise ValueError("Must compute pupil kouts first")
         
+        g_init = xf.calc_qvec(self.kouts[roi_name], kins_avg, ttheta = est_ttheta, wavelength= self.wavelength)
+
         self.kins[roi_name], _ = optimise_kin(g_init, est_ttheta, self.kouts[roi_name], self.wavelength, method, gtol)
         
         self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], self.det_psize, self.det_distance, self.centre_pixel)
@@ -822,7 +823,7 @@ class load_data:
                                    Default is 256.
     
         """
-        histograms = compute_histograms(ls, bins=120)
+        histograms = compute_histograms(self.coherent_imgs[roi_name], bins=bins)
 
         num_images = len(histograms)  # Number of images in the list
         
@@ -912,6 +913,9 @@ class load_data:
         if title is None:
             title = f"Detector image at {roi_name} in Frame ({file_no}, {frame_no})"
         plot_roi_from_numpy(data_test, self.rois_dict[roi_name], title, vmin=vmin, vmax=vmax, save = save)
+    
+    
+    
     ################### Prepares the data ###################
     def prepare_roi(self, roi_name:str, 
                     mask_val: float, 

@@ -2,11 +2,8 @@ import math
 import numpy as np 
 from scipy.interpolate import RegularGridInterpolator
 from scipy.optimize import curve_fit
-import time
-from scipy.ndimage import convolve
-import h5py 
 
-def ComputeAngles(a,b,c,hkl1,hkl2):
+def calc_angles_two_latt_planes(a,b,c,hkl1,hkl2):
     
     """
     A function that computes angles between two lattice planes for a given lattice
@@ -43,7 +40,7 @@ def ComputeAngles(a,b,c,hkl1,hkl2):
     
     return angle_deg
 
-def Bin(ar, binx, biny, binz):
+def bin_3d_array(ar, binx, biny, binz):
     """
     Bin an array in x,y,z 
     """
@@ -63,12 +60,12 @@ def Bin(ar, binx, biny, binz):
     return arraybin
 
 # Define function that creates a mask for array larger than isosurface
-def MakeMask(inarray, isurf):   #
+def mask_mask(inarray, isurf):   #
     mask = np.abs(inarray) > isurf # compare amplitude with isosurface 
     return mask
 
 # Logical OR function
-def LogicalOR(ar1, ar2):
+def logical_or(ar1, ar2):
     ar = np.logical_or(ar1, ar2) 
     return ar
 
@@ -77,15 +74,8 @@ def circular_mean(arr1, arr2):
     diff = np.arctan2(np.sin(arr1 - arr2), np.cos(arr1 - arr2))
     return diff
 
-def CalcAngle(vec1, vec2):
-    """
-    The angle between two vectors
-    """
-
-    angle = np.rad2deg(math.acos(np.dot(vec1,vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))))
-    return angle
     
-def CalcLen(arr, axis, mask_val):
+def calc_length(arr, axis, mask_val):
     """
     CAlculate the length of a 3D pbject in a np array along the given axis. 
 
@@ -150,7 +140,7 @@ def CalcLen(arr, axis, mask_val):
 
     return max_length
 
-def GetBounds(amp, mask_val):
+def get_array_bounds(amp, mask_val):
     """
     Calculate the bounds of the diffraction pattern along the x,y,z axes
     """
@@ -237,7 +227,7 @@ def pcc_loss(exp, recons):
     
     return pcc
 
-def TransposeArray(array):
+def transpose_array(array):
     
     array2 = array.transpose((2,1,0))
 
@@ -291,7 +281,7 @@ def pad_to_double_2d(array):
     
     return padded_array
     
-def PRTF(diff_array, rec_array, ring_size, fs_spacing, mask_val):
+def phase_retrieval_transfer_functoin(diff_array, rec_array, ring_size, fs_spacing, mask_val):
     
     """
     Function to compute the Phase Retrieval Transfer Function: PRTF
@@ -441,7 +431,7 @@ def _gaussian(M, *args):
     
     return gaussian_fit(x,y,z,*args)
 
-def FitToGaussian(arr):
+def fit_gaussian(arr):
     shp = arr.shape
     arr_max = np.max(arr)
 
@@ -474,144 +464,3 @@ def find_aligned_indices(arr1, arr2, tolerance=1e-5):
     aligned_indice= np.where(np.abs(dot_products-1)< tolerance)
     
     return aligned_indice[0]
-
-def filter_vectors_by_direction(arr, kins, direction, max_angle):
-    """
-    Takes an array of vector (N,3) and filters them such that they are all pointing in one direction
-    also takes the corresponding array
-    
-    Adds anoter constraint of maximum angular spread of the vectors 
-    such that the vectors are pointing in a cone
-    
-    Args:
-    arr (np.ndarray): array of vectors N,3
-    arr (np.ndarray): corresponding array of vectors N,3
-
-    direction (np.ndarray): principle direction
-    max_angle (float): [radians] angle of cone with the direction vector  
-    """
-    
-    direction /= np.linalg.norm(direction)
-    
-    cos_max_angle = math.cos(max_angle)
-        
-    cos_vectors = np.dot(arr, direction)  / np.linalg.norm(arr, axis = 1)
-    
-    arr = arr[cos_vectors>= cos_max_angle]
-    kins = kins[cos_vectors>= cos_max_angle]
-    
-    return arr, kins
-
-from joblib import Parallel, delayed
-
-def compute_norms_chunk(chunk):
-    return np.linalg.norm(chunk, axis=1)
-
-
-def filter_elastic_scatt(kouts, kins, tolerance, wavelength):
-    """
-    
-    Filters the kouts and kins to consider only when:
-    |kout| = |kin| +/- 1e-4
-
-    Args:
-        kouts (_type_): _description_
-        kins (_type_): _description_
-    """
-    # Compute the magnitudes of kin and kout
-    # kin_magnitudes = np.linalg.norm(kins, axis=1)  
-    # kout_magnitudes = np.linalg.norm(kouts, axis=1)  
-    
-    # Parallelize norm computation
-    kout_magnitudes = np.concatenate(Parallel(n_jobs=-16)(delayed(compute_norms_chunk)(chunk) for chunk in np.array_split(kouts, 8)))
-
-        
-    magnitude = 2*math.pi / wavelength
-    
-    magnitude_diff = np.abs(magnitude - kout_magnitudes)
-    mask = magnitude_diff < tolerance
-        
-    # Apply the mask to get the filtered kin and kout pairs
-    if kins.shape[0] > 1:
-        filtered_kin = kins[mask]
-    else: 
-        filtered_kin = kins
-        
-    filtered_kout = kouts[mask]
-    
-    return filtered_kout, filtered_kin, mask
-    
-def calc_detector_max_angle(detector_size, detector_distance):
-    
-    """
-    Calculates the maximum angle that a detector can capture.
-    
-    Detector is assumed to be centralised, such that centre of the detector is along the optical axis
-    
-    Returns: max angle [radians]
-    """
-    
-    sx, sy = detector_size[0]/2, detector_size[1]/2
-    
-    det_max_path = np.array([sx,sy,detector_distance])
-    
-    det_max_path /= np.linalg.norm(det_max_path)
-    
-    max_angle = math.acos(np.dot(det_max_path, np.array([0,0,1])))
-    
-    return max_angle
-
-
-def convolve_reciprocal_lattice_with_grid(shape_transform, reciprocal_vectors, kx,ky,kz):
-    """
-    Convolve reciprocal lattice points with a 3D shape transform, including grid generation.
-
-    Parameters:
-        shape_transform (numpy.ndarray): A 3D array representing the shape transform (size: grid_size).
-        reciprocal_vectors (numpy.ndarray): An (N, 3) array of reciprocal lattice vectors.
-
-    Returns:
-        output_points (numpy.ndarray): An (M, 3) array of convolved reciprocal lattice points (M = N * K).
-        combined_intensities (numpy.ndarray): An (M,) array of intensities for each convolved point.
-    """    
-    
-    # Flatten the 3D shape transform into a list of points (K, 3)
-    X, Y, Z = np.meshgrid(kx, ky, kz, indexing="ij")
-    shape_coords = np.array([X.ravel(), Y.ravel(), Z.ravel()]).T  # (K, 3)
-    shape_values = shape_transform.ravel()  # (K,)
-
-    # Number of reciprocal lattice points (N) and shape points (K)
-    N = len(reciprocal_vectors)
-    K = len(shape_coords)
-
-    # Compute the convolved points (M = N * K)
-    output_points = (reciprocal_vectors[:, None, :] + shape_coords[None, :, :]).reshape(-1, 3)  # (M, 3)
-
-    # Compute combined intensities for each point
-    reciprocal_intensities = np.ones(N)  # Default to uniform intensity; modify if needed
-    combined_intensities = (reciprocal_intensities[:, None] * shape_values[None, :]).ravel()  # (M,)
-
-    return output_points, combined_intensities
-
-
-def save_to_hdf5(file_path, scan_index, full_image, metadata):
-    """
-    Saves detector images and metadata efficiently in an HDF5 file.
-    
-    Args:
-        file_path (str): Path to the HDF5 file.
-        scan_index (int): Index of the current scan position.
-        full_image (ndarray): 2D detector image to be stored.
-        metadata (dict): Dictionary of metadata parameters.
-    """
-
-    with h5py.File(file_path, "a") as h5f:
-        # Create a group for this scan position
-        group = h5f.create_group(f"scan_{scan_index}")
-        
-        # Store the detector image
-        group.create_dataset("detector_image", data=full_image, compression="gzip", compression_opts=4)
-
-        # Save metadata as attributes
-        for key, value in metadata.items():
-            group.attrs[key] = str(value)  # Convert all metadata values to strings
