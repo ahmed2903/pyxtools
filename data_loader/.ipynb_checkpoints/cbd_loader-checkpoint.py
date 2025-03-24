@@ -9,18 +9,18 @@ import h5py
 import matplotlib.pyplot as plt
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from matplotlib.widgets import Button, TextBox
+
 from matplotlib.patches import Rectangle
 
     
 from IPython.display import display
 import concurrent
 
-from ..data_fs import * 
-from ..xrays_fs import compute_vectors, optimise_kin, objective_function, reverse_kins_to_pixels
-from  ..plotting_fs import plot_roi_from_numpy
-from ..utils import time_it
+from .data_fs import *
+from .kvectors import compute_vectors, optimise_kin, reverse_kins_to_pixels, rotation_matrix, calc_qvec, extract_parallel_line
+from .plotting import plot_roi_from_numpy, plot_pixel_space, plot_map_on_detector
+from .utils import time_it
+
 try:
     import ipywidgets as widgets
 except:
@@ -78,7 +78,8 @@ class load_data:
         self.kins = {}
         self.kin_coords = {}
         self.coherent_imgs = {}
-        
+        self.optimal_angles = {}
+        self.g_init = {}
         if self.beamtime == 'new':
             self.fnames = list_datafiles(self.dir)[:-2]        
         
@@ -140,8 +141,8 @@ class load_data:
             after applying the hot pixel mask.
         """
         self.averaged_data[roi_name] = np.mean(self.ptychographs[roi_name], axis=(0,1))
-            
         self.averaged_data[roi_name] =  mask_hot_pixels(self.averaged_data[roi_name])
+        
     def mask_hotpixels_roi(self, roi_name, hot_pixels = True, mask_val=1):
         """Applies a mask to the region of interest (ROI) to remove hot pixels.
     
@@ -268,15 +269,115 @@ class load_data:
         self.kouts[roi_name] = compute_vectors(self.kout_coords[roi_name], self.det_distance, self.det_psize, self.centre_pixel, self.wavelength)
         
     def compute_kins(self, roi_name, est_ttheta, method = "BFGS", gtol = 1e-6):
+        """
+        Computes the incident wavevectors (kins) for a given region of interest (ROI) 
+        by optimizing the initial q-vector estimate.
+
+        Args:
+            roi_name (str): 
+                The name of the region of interest (ROI) for which kins are computed.
+            est_ttheta (float): 
+                Estimated scattering angle (two-theta) in radians.
+            method (str, optional): 
+                Optimization method to use for minimizing the k-vector difference. 
+                Defaults to "BFGS".
+            gtol (float, optional): 
+                Gradient tolerance for optimization. Defaults to 1e-6.
+
+        Raises:
+            ValueError: If the pupil kouts have not been computed before calling this function.
+
+        Updates the following attributes of the instance:
+            - `self.kins[roi_name]`: Optimized incident wavevectors.
+            - `self.optimal_angles[roi_name]`: Optimized rotation angles (alpha, beta, gamma).
+            - `self.kin_coords[roi_name]`: Pixel coordinates corresponding to `self.kins[roi_name]`.
+        """
+
+        if roi_name == 'pupil':
+            self.kins[roi_name] = self.kouts[roi_name]
+            self.kin_coords[roi_name] = self.kout_coords[roi_name]
+            return 
         
         try:
-            g_init = np.mean(self.kouts["pupil"], axis = 0)
+            self.kins_avg = np.mean(self.kouts["pupil"], axis = 0, keepdims = True )
         except:
             raise ValueError("Must compute pupil kouts first")
         
-        self.kins[roi_name], _ = optimise_kin(g_init, est_ttheta, self.kouts[roi_name], self.wavelength, method, gtol)
+        self.g_init[roi_name] = calc_qvec(self.kouts[roi_name], self.kins_avg, ttheta = est_ttheta, wavelength= self.wavelength)
+
+        self.kins[roi_name], self.optimal_angles[roi_name] = optimise_kin(self.g_init[roi_name], est_ttheta, self.kouts[roi_name], self.wavelength, method, gtol)
         
         self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], self.det_psize, self.det_distance, self.centre_pixel)
+    
+    def refine_kins(self, roi_name, shifts):
+        """
+        Refine the estimated incident wavevectors (kins) by adjusting the optimal angles.
+
+        Args:
+            roi_name (str): The region of interest name.
+            shifts (tuple): A tuple of (alpha_shift, beta_shift, gamma_shift) to refine angles.
+        """
+        alpha,beta,gamma = (self.optimal_angles[roi_name][0] + shifts[0],
+                            self.optimal_angles[roi_name][1] + shifts[1],
+                            self.optimal_angles[roi_name][2] + shifts[2] )
+        
+        R = rotation_matrix(alpha, beta, gamma)
+        try:
+            g_update =  R @ self.g_init[roi_name]
+        except:
+            g_update =  R @ self.g_init[roi_name][0]
+        kin_opt = (self.kouts[roi_name]-g_update)
+        kin_opt /= np.linalg.norm(kin_opt, axis = 1)[:,np.newaxis]
+        kin_opt *= 2*np.pi/self.wavelength
+        self.kins[roi_name] = kin_opt
+        self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], self.det_psize, self.det_distance, self.centre_pixel)
+
+    def select_single_pixel_streak(self, roi_name, width=1, position='center', offset=0):
+
+        """
+        Selects a single-pixel-wide streak along a specified direction in the region of interest (ROI).
+
+        This method extracts a narrow streak from the `kin_coords` of the specified ROI and applies the
+        same selection mask to `kins`, `kin_coords`, `kouts`, and `kout_coords`.
+    
+        Args:
+            roi_name (str): The name of the region of interest.
+            width (int, optional): The width of the streak to extract. Default is 1.
+            position (str, optional): The position of the streak relative to the main region.
+                Options: 'center', 'top', 'bottom'. Default is 'center'.
+            offset (int, optional): An offset value to shift the streak selection up or down. Default is 0.
+
+        """
+        mask = extract_parallel_line(self.kin_coords[roi_name], width=width, position=position, offset=offset)
+
+        self.kins[roi_name] = self.kins[roi_name][mask]
+        self.kin_coords[roi_name] = self.kin_coords[roi_name][mask]
+        self.kouts[roi_name] = self.kouts[roi_name][mask]
+        self.kout_coords[roi_name] = self.kout_coords[roi_name][mask]
+
+    def select_streak_region(self, roi_name, percentage=10, start_position='lowest', start_idx=None):
+        """
+        Selects a region of the streak based on a percentage of its total size.
+
+        This method extracts a portion of the streak from the `kin_coords` of the specified ROI,
+        starting from a defined position or index, and applies the same selection mask to `kins`, 
+        `kin_coords`, `kouts`, and `kout_coords`.
+    
+        Args:
+            roi_name (str): The name of the region of interest.
+            percentage (float, optional): The percentage of the streak to retain. Default is 10%.
+            start_position (str, optional): The starting position for selection.
+                Options: 'lowest' (bottom), 'highest' (top), or 'middle'. Default is 'lowest'.
+            start_idx (int, optional): The specific index to start selection from. Overrides `start_position` if provided.
+        """
+        
+        mask = extract_streak_region(self.kin_coords[roi_name], percentage=percentrage, start_position=start_position, 
+                                     start_idx=start_idx, seed=42)
+
+        self.kins[roi_name] = self.kins[roi_name][mask]
+        self.kin_coords[roi_name] = self.kin_coords[roi_name][mask]
+        self.kouts[roi_name] = self.kouts[roi_name][mask]
+        self.kout_coords[roi_name] = self.kout_coords[roi_name][mask]
         
     ################### preprocessing coherent images ###################
     @time_it
@@ -304,11 +405,10 @@ class load_data:
             xp =  coord[0] - self.rois_dict[roi_name][0]
             yp =  coord[1] - self.rois_dict[roi_name][2]
 
-            coh_img = make_coherent_image(self.ptychographs[roi_name], np.array([xp,yp]))
+            coherent_imgs.append(make_coherent_image(self.ptychographs[roi_name], np.array([xp,yp])))
 
-            coherent_imgs.append(coh_img)
-
-        self.coherent_imgs[roi_name] = np.array(coherent_imgs)  
+        self.coherent_imgs[roi_name] = np.array(coherent_imgs).copy()
+        
     def filter_coherent_images(self, roi_name:str, variance_threshold):
         """Filters coherent images based on variance threshold.
 
@@ -331,9 +431,9 @@ class load_data:
                                                                          variance_threshold = variance_threshold)
     
 
-        self.coherent_imgs[roi_name] = cleaned_coh_images
-        self.kouts[roi_name] = cleaned_kxky
-        self.kins[roi_name] = cleaned_kins
+        self.coherent_imgs[roi_name] = cleaned_coh_images.copy()
+        self.kouts[roi_name] = cleaned_kxky.copy()
+        self.kins[roi_name] = cleaned_kins.copy()
     def remove_coh_background(self, roi_name, sigma):
         """Removes the background noise from coherent images for a given region of interest (ROI).
 
@@ -378,8 +478,26 @@ class load_data:
             roi_name (str): The name of the region of interest (ROI) for which the pixels 
                              and k-vectors will be reordered.
         """
-        self.kouts[roi_name], self.coherent_imgs[roi_name] = reorder_pixels_from_center(self.kouts[roi_name], connected_array=np.array(self.coherent_imgs[roi_name]))
-    
+        sorted_indices = reorder_pixels_from_center(self.kouts[roi_name], connected_array=np.array(self.coherent_imgs[roi_name]))
+        
+        # Debugging: Print types and shapes
+        print(f"sorted_indices dtype: {sorted_indices.dtype}, shape: {sorted_indices.shape}")
+        print(f"kouts shape before indexing: {self.kouts[roi_name].shape}")
+
+        self.kouts[roi_name] = self.kouts[roi_name][sorted_indices]
+        self.kout_coords[roi_name] = self.kout_coords[roi_name][sorted_indices]
+        self.coherent_imgs[roi_name] = self.coherent_imgs[roi_name][sorted_indices]
+
+        try:
+            self.kins[roi_name] = self.kins[roi_name][sorted_indices]
+            self.kin_coords[roi_name] = self.kin_coords[roi_name][sorted_indices]
+        except:
+            print("Did not order kins and kin coords.")
+
+        try:
+            self.images_object[roi_name] = self.images_object[roi_name][sorted_indices]
+        except:
+            print("Did not order detected objects.")
     def apply_median_filter(self, roi_name, kernel_size, stride, threshold):
         """Applies a median filter to coherent images for a given region of interest (ROI).
 
@@ -427,7 +545,7 @@ class load_data:
             kernel_size (int): The size of the square kernel to be used for the bilateral 
                             filter. A larger kernel size will result in stronger filtering.
     """
-        self.coherent_images[roi_name] = bilateral_filter_parallel(self.coherent_images[roi_name], sigma_spatial, sigma_range, kernel_size)
+        self.coherent_imgs[roi_name] = bilateral_filter_parallel(self.coherent_imgs[roi_name], sigma_spatial, sigma_range, kernel_size)
     def detect_object(self, roi_name, threshold, min_val, max_val):
         """Detects objects within the specified region of interest (ROI) and filters based on intensity.
 
@@ -445,12 +563,20 @@ class load_data:
     
         """
         self.images_object[roi_name] = detect_obj_parallel(self.coherent_imgs[roi_name], threshold=threshold)
-        mask = [np.sum(im) > min_val and np.sum(im) < max_val for im in self.images_object[roi_name]]
-
         
-        self.coherent_imgs[roi_name] = np.array(self.coherent_imgs[roi_name])[mask]
-        self.kouts[roi_name] = np.array(self.kouts[roi_name])[mask]
-        self.kins[roi_name] = np.array(self.kins[roi_name])[mask]
+        
+        mask = [np.sum(im) > min_val and np.sum(im) < max_val for im in self.images_object[roi_name]]
+        print(f'length of the mask is {np.sum(mask)}')
+        
+        self.images_object[roi_name] = np.array(self.images_object[roi_name])[mask].copy()
+        self.coherent_imgs[roi_name] = np.array(self.coherent_imgs[roi_name])[mask].copy()
+
+        print(f'length of detected objects {self.images_object[roi_name].shape}')
+        print(f'length of coherent images {self.coherent_imgs[roi_name].shape}')
+        
+        self.kouts[roi_name] = np.array(self.kouts[roi_name])[mask].copy()
+        self.kins[roi_name] = np.array(self.kins[roi_name])[mask].copy()
+        
     def blur_detected_objs(self, roi_name, sigma):
         """Applies Gaussian blur to the detected objects in the specified region of interest (ROI).
 
@@ -793,7 +919,7 @@ class load_data:
 
         display(interactive_plot)  # Show slider
         #display(fig)  # Display the figure
-    def plot_pixel_space(self,roi_name, connection=False):
+    def plot_kin_space(self,roi_name, connection=False):
         """Plots the pixel space of the given region of interest (ROI) using k-vectors.
 
         This method visualizes the pixel space of a specific ROI by plotting its k-vectors.
@@ -806,7 +932,7 @@ class load_data:
                                          Defaults to False.
     
         """
-        plot_pixel_space(self.kouts[roi_name], connection=connection)
+        plot_pixel_space(self.kins[roi_name], connection=connection)
     def plot_intensity_histograms(self, roi_name, bins = 256):
         """Displays intensity histograms of images in a given ROI and allows scrolling through them via a slider.
 
@@ -822,7 +948,7 @@ class load_data:
                                    Default is 256.
     
         """
-        histograms = compute_histograms(ls, bins=120)
+        histograms = compute_histograms(self.coherent_imgs[roi_name], bins=bins)
 
         num_images = len(histograms)  # Number of images in the list
         
@@ -912,6 +1038,41 @@ class load_data:
         if title is None:
             title = f"Detector image at {roi_name} in Frame ({file_no}, {frame_no})"
         plot_roi_from_numpy(data_test, self.rois_dict[roi_name], title, vmin=vmin, vmax=vmax, save = save)
+    
+    def plot_calculated_kins(self,roi_name,vmin=None, vmax = None, title="Mapped kins onto pupil", cmap = "viridis"):
+        """Plots the calculated k-in coordinates mapped onto the pupil function.
+
+        This method visualizes the k-in coordinates by mapping them onto the pupil function of the 
+        detector using a specified colormap.
+    
+        Args:
+            roi_name (str): The name of the region of interest.
+            vmin (float, optional): Minimum value for color scaling. Default is None (auto-scale).
+            vmax (float, optional): Maximum value for color scaling. Default is None (auto-scale).
+            title (str, optional): Title of the plot. Default is "Mapped kins onto pupil".
+            cmap (str, optional): Colormap to use for visualization. Default is "viridis".
+        """
+        plot_map_on_detector(self.averaged_data["pupil"], self.kin_coords[roi_name], 
+                             vmin, vmax, title, cmap, crop=False,roi= self.rois_dict["pupil"])
+
+    def plot_kouts(self, roi_name, vmin=None, vmax = None, title="Mapped kouts", cmap = "viridis"):
+        
+        """Plots the calculated k-out coordinates mapped onto the detector.
+
+        This method visualizes the k-out coordinates by mapping them onto the detector data, allowing 
+        for analysis of diffraction patterns.
+    
+        Args:
+            roi_name (str): The name of the region of interest.
+            vmin (float, optional): Minimum value for color scaling. Default is None (auto-scale).
+            vmax (float, optional): Maximum value for color scaling. Default is None (auto-scale).
+            title (str, optional): Title of the plot. Default is "Mapped kouts".
+            cmap (str, optional): Colormap to use for visualization. Default is "viridis".
+        """
+        plot_map_on_detector(self.averaged_data[roi_name], self.kout_coords[roi_name], 
+                             vmin, vmax, title, cmap, crop=False,roi= self.rois_dict[roi_name])
+
+        
     ################### Prepares the data ###################
     def prepare_roi(self, roi_name:str, 
                     mask_val: float, 
@@ -948,7 +1109,40 @@ class load_data:
             self.pool_detector_space(roi_name, *pool_det)
         self.average_frames_roi(roi_name=roi_name)
         self.make_kouts(roi_name=roi_name,mask_val= mask_val)
-        
+
+    def prepare_kins(self, roi_name:str, 
+                    ttheta: float, # Two Theta value of the reflection in degrees
+                    streak_width = 1, 
+                    streak_position = 'center', 
+                    streak_offset = 0, 
+                    percentage = 10, 
+                    start_position = 'lowest', 
+                    start_idx = None
+                    ):
+        """
+        Prepares the k-in vectors for a given region of interest (ROI).
+
+        This method processes the k-in vectors by computing their values based on the provided
+        two-theta angle, then extracting a narrow streak that represents a '2D' projection, and selecting a specified portion of the streak.
+    
+        Args:
+            roi_name (str): The name of the region of interest.
+            ttheta (float): The two-theta angle of the reflection in degrees.
+            streak_width (int, optional): The width of the extracted streak in pixels. Default is 1.
+            streak_position (str, optional): The position of the streak relative to the main region.
+                Options: 'center', 'top', 'bottom'. Default is 'center'.
+            streak_offset (int, optional): An offset value to shift the streak selection. Default is 0.
+            percentage (float, optional): The percentage of the streak to retain. Default is 10%.
+            start_position (str, optional): The starting position for selection.
+                Options: 'lowest' (bottom), 'highest' (top), or 'middle'. Default is 'lowest'.
+            start_idx (int, optional): The specific index to start selection from. If provided, it overrides `start_position`.
+        """
+        ttheta_rad = np.deg2rad(ttheta) #Gold (400) reflection
+        self.compute_kins(roi_name, est_ttheta = ttheta_rad)
+        self.select_streak_region(self, roi_name, percentage=percentage, start_position=start_position, start_idx=start_idx)
+        self.select_single_pixel_streak(self, roi_name, width=streak_width, position=streak_position, offset=streak_offset)
+
+    
     def prepare_coherent_images(self, roi_name:str, 
                                 mask_region = None,
                                 variance_threshold = None, 

@@ -1,56 +1,14 @@
 import matplotlib.pyplot as plt
+#import pyvista as pv
 import numpy as np 
-from .utils import time_it
-from PIL import Image 
 import matplotlib.patches as patches
+import pyvista as pv
+from matplotlib.patches import Rectangle
 from IPython.display import display
+from PIL import Image 
 import ipywidgets as widgets
+from utils import time_it
 
-def plot_roi_from_numpy(array, roi=None, name=None, vmin=None, vmax=None, save = False, **kwargs):
-
-    """
-    Plots a region of interest from a 2D numpy array
-
-    input: 
-        array : numpy array (2D or 3D)
-        roi : list, Region of interest, [min vertical axis, max vertical axis, min horizontal axis, max horizontal axis] 
-        name: str, name to be used for title and saving the figure
-        vmin: float, color map minimum
-        vmax: float, color map maximum
-        save: bool, if True, saves the plot
-        frame: int, frame number if array is 3D 
-    """
-    if roi is None:
-        roi = [0,-1,0,-1]
-
-    if name is None:
-        name = "Plot"
-
-    # Plot the pupil
-    if len(array.shape) == 3 and 'frame' in kwargs:
-        frame = kwargs['frame']
-        data_roi = array[frame, roi[0]:roi[1], roi[2]:roi[3]]
-    elif len(array.shape) == 2:
-        data_roi = array[roi[0]:roi[1], roi[2]:roi[3]]
-    else:
-        raise ValueError("Either pass in a 2D array or a 3D array with 'frame' in the kwargs.")
-
-    if vmin is None:
-        me = np.mean(data_roi) 
-        vmin = me - 0.5 *me
-    if vmax is None:
-        me = np.mean(data_roi) 
-        vmax = me + 0.5 *me
-        
-    plt.figure()
-    plt.imshow(data_roi, vmin = vmin, vmax = vmax,cmap='viridis')
-    plt.title(name)
-    plt.colorbar()
-    plt.show()
-    
-    if save:
-        plt.savefig(name)
-        
 @time_it
 def create_gif_from_arrays(array_list, gif_name, fps=10, cmap="viridis"):
     """
@@ -148,80 +106,162 @@ def two_lists_one_gif(array_list1, array_list2, gif_name, title1 = "Image 1", ti
     for file in frame_files:
         import os
         os.remove(file)
-        
-def plot_pixel_space(ordered_pixels, connection=False):
-    """
-    Plots the pixel coordinates before and after reordering.
+
+
+
+
+def plot_3d_array(array: np.ndarray, show = True, **kwargs):
     
-    Args:
-        ordered_pixels (list of tuples): Reordered pixel coordinates.
     """
-    # Convert lists to NumPy arrays for easy plotting
-    ordered_pixels = np.array(ordered_pixels)
-
-    # Create figure
-    fig, ax = plt.subplots(1,1 ,figsize=(12, 6))
-
-    # Plot original pixel positions (unordered)
-    ax.scatter(ordered_pixels[:, 0], ordered_pixels[:, 1], color='red', label="Pixels")
-    if connection:
-        ax.plot(ordered_pixels[:, 0], ordered_pixels[:, 1], color='red', label="Pixels")
-
-    ax.set_title("Original Pixel Coordinates")
-    ax.invert_yaxis()  # Invert to match image coordinates
-
-    plt.show()
+    array: array to be plotted, shaoe (x,y,z)
+    show: whether to render a live plot
+    fname: if provided the file will be saved as a pdf
+    opacity (list): the rendering isosurfaces 
     
-def plot_map_on_detector(detec_image, k_map, vmin, vmax, title, cmap, crop=False,**kwargs):
-
     """
+    Nx,Ny,Nz = array.shape
 
-    optional args: 
-        color: color of the rectangle
-        rec_size: size of the rectangle
-        fname: if passed, figure will be saved as the fname
-    """
+    grid = pv.wrap(array)
 
-    if 'roi' in kwargs:
-        roi = kwargs['roi']
-        sx, ex, sy, ey = roi
+    # Add metadata if needed
+    grid.dimensions = (Nx, Ny, Nz)
+    grid.spacing = (1, 1, 1)
+
+    # Plot
+    plotter = pv.Plotter(off_screen=False)
+    if "opacity" in kwargs:
+        opacity = kwargs["opacity"]
     else:
-        sx = 0
-        sy = 0
-        
+        opacity = 'linear'  # Fully transparent below threshold, fully opaque above
+
+    plotter.add_volume(grid, cmap='jet', opacity=opacity)
+    # Plot the volume
+    plotter.show_axes()
     
-    if crop:
-        detec_image = detec_image[sx:ex, sy:ey]    
-    
+    if "fname" in kwargs:
+        fname = kwargs["fname"]
         
-    fig, ax = plt.subplots()
+        plotter.save_graphic(f"{fname}.pdf")
 
-    if 'color' in kwargs:
-        color = kwargs['color']
-    else: 
-        color = 'white'
+    if show:
+        plotter.show()
 
-    if 'rec_size' in kwargs:
-        rec_size = kwargs['rec_size']
-    else: 
-        rec_size = 1
-        
-    # Add a white rectangle at each of the indices
-    for idx in k_map:
-        rect_x = idx[1] - 1 - sy  # X-coordinate of the bottom-left corner
-        rect_y = idx[0] - 1 - sx # Y-coordinate of the bottom-left corner
-        rect = patches.Rectangle((rect_x, rect_y), rec_size, rec_size, linewidth=2, edgecolor=color, facecolor=color)
-        ax.add_patch(rect)
-
-    im = ax.imshow(detec_image, cmap=cmap,  vmin=vmin, vmax=vmax, origin = 'lower')
-    fig.colorbar(im, orientation='vertical')
-    plt.title(title)
-    if 'fname' in kwargs:
-        name = kwargs['fname']
-        plt.savefig(name)
+    plotter.close()
     
-    plt.show()
+    
+def plot_vecs(kins, kouts, qvecs):
+    
+    #Function to add vectors to the plot
 
+        # Create a PyVista plotter
+        plotter = pv.Plotter(off_screen=False)
+
+        def add_vectors(plotter, start_points, vectors, color, shaft_scale = 0.25, tip_scale=.2):
+            
+            magnitude = np.linalg.norm(vectors[0])
+            
+            shaft_radius = shaft_scale * 1.0 / magnitude 
+            tip_radius = shaft_radius+tip_scale
+            
+            for start, vec in zip(start_points, vectors):
+                arrow = pv.Arrow(start=start, direction=vec, scale='auto', shaft_radius=shaft_radius, tip_radius=tip_radius)
+                plotter.add_mesh(arrow, color=color)
+
+        kins = kins *1e-10#/ np.linalg.norm(kins, axis = 1)[:, np.newaxis]
+        kouts = kouts *1e-10#/ np.linalg.norm(kouts, axis = 1)[:, np.newaxis]
+        qvecs = qvecs *1e-10#/ np.linalg.norm(qvecs, axis = 1)[:, np.newaxis]
+        
+        
+
+        # Origin for kins and kouts
+        origin = np.array([0, 0, 0])
+
+
+        X = 500
+        
+        # Add kins vectors
+        add_vectors(plotter, [origin] * len(kins[:X]), kins[:X], "blue", shaft_scale= 0.01, tip_scale=.02)
+
+        # Add kouts vectors
+        add_vectors(plotter, [origin] * len(kouts[:X]), kouts[:X], "green", shaft_scale= 0.01,tip_scale=.02)
+
+        # Add qvec vectors (start at kins, end at kouts)
+        add_vectors(plotter, [origin] * len(qvecs[:X]), qvecs[:X], "red", shaft_scale= 0.01,tip_scale=.01)
+        
+        plotter.view_xz()
+        plotter.background_color = 'white'
+        # Add legend and show
+        plotter.add_legend([
+            ("kins (blue)", "blue"),
+            ("kouts (green)", "green"),
+            ("qvec (red)", "red"),
+        ])
+
+        # Add axes
+        plotter.show_axes()  # Displays x, y, z axes in the 3D plot
+        plotter.show()
+        plotter.close()
+
+
+
+from matplotlib.animation import FuncAnimation
+from IPython.display import display, clear_output
+
+
+    
+def plot_images_side_by_side(image1, image2, 
+                             vmin1= None, vmax1=None, 
+                             vmin2= None, vmax2=None, 
+                             title1="Image 1", title2="Image 2", cmap1="gray", cmap2="gray", figsize=(10, 5), show = False, save_fname = None):
+    """
+    Plots two images side by side.
+
+    Parameters:
+    - image1: First image (2D numpy array).
+    - image2: Second image (2D numpy array).
+    - title1: Title for the first image (default: "Image 1").
+    - title2: Title for the second image (default: "Image 2").
+    - cmap1: Colormap for the first image (default: "gray").
+    - cmap2: Colormap for the second image (default: "gray").
+    - figsize: Size of the figure (default: (10, 5)).
+    """
+    # Create a figure and subplots
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+    
+    
+    if vmin1 is None:
+        me = np.mean(image1) 
+        vmin1 = me - 0.5 *me
+    if vmax1 is None:
+        me = np.mean(image1) 
+        vmax1 = me + 0.5 *me
+    
+    if vmin2 is None:
+        me = np.mean(image2) 
+        vmin2 = me - 0.5 *me
+    if vmax2 is None:
+        me = np.mean(image2) 
+        vmax2 = me + 0.5 *me
+    
+    # Plot the first image
+    im1 = axes[0].imshow(image1, vmin = vmin1, vmax = vmax1, cmap=cmap1)    
+    axes[0].set_title(title1)
+    #axes[0].axis('off')  # Hide axes
+    plt.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04)
+    
+    # Plot the second image
+    im2 = axes[1].imshow(image2, vmin = vmin2, vmax = vmax2, cmap=cmap2)
+    axes[1].set_title(title2)
+    #axes[1].axis('off')  # Hide axes
+    plt.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
+    
+    # Adjust layout and display
+    plt.tight_layout()
+    if show:
+        plt.show()
+
+    if save_fname is not None:
+        plt.savefig(save_fname)
 
 def two_lists_one_slider(img_list1, img_list2, scale_fac=0.3, vmin1 = None, vmax1 = None, vmin2=None, vmax2=None, cmap1 = 'viridis', cmap2 = 'viridis'):
     """Displays a list of coherent images and allows scrolling through them via a slider."""
@@ -318,3 +358,27 @@ def plot_list_slider(img_list, scale_fac=0.3, vmin1 = None, vmax1 = None):
 
     display(interactive_plot)  # Show slider
     #display(fig)  # Display the figure
+
+def plot_pixel_order(ordered_pixels, connection=False):
+    """
+    Plots the pixel coordinates before and after reordering.
+    
+    Args:
+        ordered_pixels (list of tuples): Reordered pixel coordinates.
+    """
+    # Convert lists to NumPy arrays for easy plotting
+    ordered_pixels = np.array(ordered_pixels)
+
+    # Create figure
+    fig, ax = plt.subplots(1,1 ,figsize=(12, 6))
+
+    # Plot original pixel positions (unordered)
+    ax.scatter(ordered_pixels[:, 0], ordered_pixels[:, 1], color='red', label="Pixels")
+    if connection:
+        ax.plot(ordered_pixels[:, 0], ordered_pixels[:, 1], color='red', label="Pixels")
+
+    ax.set_title("Original Pixel Coordinates")
+    ax.invert_yaxis()  # Invert to match image coordinates
+
+    plt.show()
+
