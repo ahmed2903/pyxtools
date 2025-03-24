@@ -17,7 +17,7 @@ from IPython.display import display
 import concurrent
 
 from .data_fs import *
-from .kvectors import compute_vectors, optimise_kin, reverse_kins_to_pixels, rotation_matrix, calc_qvec, extract_parallel_line
+from .kvectors import compute_vectors, optimise_kin, reverse_kins_to_pixels, rotation_matrix, calc_qvec, extract_parallel_line, extract_streak_region
 from .plotting import plot_roi_from_numpy, plot_pixel_space, plot_map_on_detector
 from .utils import time_it
 
@@ -371,7 +371,7 @@ class load_data:
             start_idx (int, optional): The specific index to start selection from. Overrides `start_position` if provided.
         """
         
-        mask = extract_streak_region(self.kin_coords[roi_name], percentage=percentrage, start_position=start_position, 
+        mask = extract_streak_region(self.kin_coords[roi_name], percentage=percentage, start_position=start_position, 
                                      start_idx=start_idx, seed=42)
 
         self.kins[roi_name] = self.kins[roi_name][mask]
