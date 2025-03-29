@@ -302,7 +302,16 @@ class load_data:
             self.kins_avg = np.mean(self.kouts["pupil"], axis = 0, keepdims = True )
         except:
             raise ValueError("Must compute pupil kouts first")
+
+        kouts_avg = np.mean(self.kouts[roi_name], axis = 0, keepdims = True )
+        kouts_avg /= np.linalg.norm(kouts_avg)
         
+        kins_avg = self.kins_avg/np.linalg.norm(self.kins_avg)
+        
+        angle = np.arccos(np.sum(kins_avg* kouts_avg))
+        angle = np.rad2deg(angle)
+        
+        print(f"the initial 2theta angle is: {angle}")
         self.g_init[roi_name] = calc_qvec(self.kouts[roi_name], self.kins_avg, ttheta = est_ttheta, wavelength= self.wavelength)
 
         self.kins[roi_name], self.optimal_angles[roi_name] = optimise_kin(self.g_init[roi_name], est_ttheta, self.kouts[roi_name], self.wavelength, method, gtol)

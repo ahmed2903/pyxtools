@@ -20,9 +20,9 @@ import cv2
 
 import scipy
 import scipy.fft
+from . import xrays_fs as xf
+from . import general_fs as gf
 from .utils import time_it
-
-################# Load Data #################
 
 def load_hdf_roi(data_folder, f_name, roi):
     """
@@ -194,8 +194,6 @@ def stack_4d_data_old(file_path,roi, fast_axis_steps, slow_axis = 0):
     
     return stacked_data
 
-
-################# Process Data #################
 @time_it
 def sum_pool2d_array(input_array, kernel_size, stride=None, padding=0):
     """
@@ -272,20 +270,11 @@ def make_detector_image(data: np.ndarray, position_idx:np.ndarray):
 
 def make_coordinates(array, mask_val, roi, crop=False):
 
-    """
-    Args:
-        array (ndarray): The array from which to calculate the coordinates. 
-        mask_val (float): Only pixels above this value will be considered
-        roi (list or tuple): the region of interest in pixels (row_start, row_end, column_start, column_end)
     
-    Returns:
-        coords (ndarray): (N,2) array that is structured as (rows, columns) 
-    """
     if crop:
         array = array[roi[0]:roi[1], roi[2]:roi[3]]
         
     indices = np.where(array > mask_val)
-    
     coords = np.array([(int(i)+ roi[0], int(j)+roi[2]) for i, j in zip(indices[0], indices[1])])
 
     return coords
@@ -370,6 +359,27 @@ def estimate_pupil_size(array, mask_val, pixel_size, pupil_roi, crop=True):
 
     return avg_x, avg_y
 
+def get_kin(array, kins, roi, mask_val, ttheta_real, crop, det_focus_distance, det_crys_distance, det_psize, det_cen_pixel, wavelength, method, gtol):
+
+    if crop:
+        array = array[:,roi[0]:roi[1],roi[2]:roi[3]]
+
+    coords = make_coordinates(array, mask_val, roi, crop=crop)
+
+    kouts = xf.compute_vectors(coords, det_crys_distance, det_psize, det_cen_pixel, wavelength)
+
+    kins_avg = np.mean(kins, axis = 0, keepdims = True )
+    
+    ttheta_est = np.mean(xf.calc_ttheta_from_kout(kouts, kins_avg))
+    print(f"The estimated two theta value for this configuration is: {np.rad2deg(ttheta_est)}")
+    qvec_0 = xf.calc_qvec(kouts, kins_avg, ttheta = ttheta_real, wavelength= wavelength)
+
+    ki, opt_angles = xf.optimise_kin(qvec_0, ttheta_real, kouts, wavelength, method, gtol)
+    
+    map_kins = xf.reverse_kins_to_pixels(ki, det_psize, det_focus_distance,  det_cen_pixel)
+
+    return map_kins, ki, opt_angles
+
 
 def downsample_array(arr, new_shape):
     """
@@ -431,7 +441,7 @@ def make_2dimensions_even(array_list):
         
     padded_arrays = Parallel(n_jobs=4)(delayed(process_array)(arr) for arr in array_list)
     
-    return np.array(padded_arrays)
+    return padded_arrays
 
 @time_it
 def filter_images(images, coords, variance_threshold, kin_coords=None, **kwargs):
@@ -526,13 +536,12 @@ def align_images(image_list):
     ref_img = image_list[0]  # Use first image as reference
     aligned_images.append(ref_img)
     
-    for img in image_list[1:]:
+    for img in image_list:
         avg = np.mean(np.array(aligned_images), axis = 0)    
         shift = phase_correlation(avg, img)  # Find shift
         aligned_img = scipy.ndimage.shift(img, shift, mode='constant')  # Apply shift
         aligned_images.append(aligned_img)
-
-    aligned_images = np.array(aligned_images)
+    
     return aligned_images
 
 
@@ -546,31 +555,9 @@ def remove_background(image, sigma=20):
 def remove_background_parallel(image_list, sigma=20, n_jobs = 8):
     """Applies background removal to all images in a list using multiprocessing."""
     result = Parallel(n_jobs=n_jobs)(delayed(remove_background)(im, sigma) for im in image_list)
-    result = np.array(result)
     return result
     
-def upsample_image(im, zoom_factor):
-    """
-    Upsample a single image using zoom.
-    """
-    return zoom(im, zoom_factor, order=3).astype(complex)
 
-def upsample_images(images, zoom_factor, n_jobs=4):
-    """
-    Upsample a list of images in parallel.
-
-    Parameters:
-        images (list of numpy.ndarray): List of input images.
-        zoom_factor (float or tuple): Zoom factor for upsampling.
-        n_jobs (int): Number of CPU cores to use. Default is -1 (use all available cores).
-
-    Returns:
-        numpy.ndarray: Array of upsampled images.
-    """
-    # Use joblib to parallelize the upsampling
-    up_images = Parallel(n_jobs=n_jobs)(delayed(upsample_image)(im, zoom_factor) for im in images)
-
-    return np.array(up_images)
 
 def detect_object(image, threshold_factor=0.5):
     """Detects the object by thresholding and finding the largest connected component."""
@@ -597,7 +584,7 @@ def detect_object(image, threshold_factor=0.5):
 def detect_obj_parallel(image_list, threshold=.1, n_jobs = 8):
     """Applies background removal to all images in a list using multiprocessing."""
     result = Parallel(n_jobs=n_jobs)(delayed(detect_object)(im, threshold) for im in image_list)
-    return np.array(result)
+    return result
 
 
 from scipy.ndimage import uniform_filter
@@ -660,53 +647,11 @@ def median_filter_parallel(images, kernel_size, stride, threshold, n_jobs=32):
     filtered_images = Parallel(n_jobs=n_jobs)(
         delayed(median_filter)(image, kernel_size, stride, threshold) for image in images
     )
-    filtered_images = np.array(filtered_images)
 
     return filtered_images
 
 
-def pad_to_double(img):
-    """
-    Pads each 2D numpy array in a list to double its size.
-    The original image will be centered in the padded output.
-    
-    Args:
-        image_list: List of 2D numpy arrays
-        
-    Returns:
-        List of padded 2D numpy arrays, each with double the dimensions
-    """
-    
-    # Get original dimensions
-    h, w = img.shape
-    
-    # Calculate padding for each side
-    pad_h = h // 2
-    pad_w = w // 2
-    
-    # Pad the image with zeros
-    padded_img = np.pad(img, ((pad_h, pad_h), (pad_w, pad_w)), mode='constant', constant_values=0)
-    
-    return padded_img
 
-@time_it
-def pad_to_double_parallel(image_list, n_jobs=8):
-    """
-    Slices the center of each 2D numpy array in a list,
-    keeping only half the size in each dimension.
-    
-    Args:
-        image_list: List of 2D numpy arrays
-        
-    Returns:
-        List of center-sliced 2D numpy arrays, each with half the dimensions
-    """
-    # Use joblib to parallelize the median filter application
-    padded_images = Parallel(n_jobs=n_jobs)(
-        delayed(pad_to_double)(image) for image in image_list
-    
-    )
-    return padded_images
 
 
 def exctract_centres_parallel(image_list, n_jobs=8):
@@ -814,7 +759,9 @@ def apply_gaussian_blur(arrays, sigma=1):
     list of numpy arrays: The blurred objects.
     """
     blurred_objects = [gaussian_filter(arr, sigma=sigma) for arr in arrays]
-    return np.array(blurred_objects)
+    return blurred_objects
+
+
 
 def compute_histograms(image_list, bins=256):
     """
@@ -881,9 +828,8 @@ def bilateral_filter_parallel(image_list, sigma_spatial=3, sigma_range=50, kerne
     # Use joblib to parallelize the median filter application
     padded_images = Parallel(n_jobs=n_jobs)(
         delayed(bilateral_filter)(image, sigma_spatial,sigma_range,kernel_size) for image in image_list)
-    
-    padded_images = np.array(padded_images)
     return padded_images
+
 @time_it
 def reorder_pixels_from_center(pixel_coords, connected_array=None):
     """
@@ -911,7 +857,11 @@ def reorder_pixels_from_center(pixel_coords, connected_array=None):
 
     # Sort pixels by increasing distance
     sorted_indices = np.argsort(distances_from_center)
-    # Ensure sorted_indices is a NumPy array and not a tuple
-    sorted_indices = np.array(sorted_indices, dtype=int)
-    
-    return sorted_indices
+    ordered_pixels = pixel_coords[sorted_indices]
+
+    if connected_array is not None:
+        ordered_array = connected_array[sorted_indices]
+
+        return ordered_pixels.tolist(), ordered_array
+        
+    return ordered_pixels.tolist()

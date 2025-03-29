@@ -272,11 +272,20 @@ def make_detector_image(data: np.ndarray, position_idx:np.ndarray):
 
 def make_coordinates(array, mask_val, roi, crop=False):
 
+    """
+    Args:
+        array (ndarray): The array from which to calculate the coordinates. 
+        mask_val (float): Only pixels above this value will be considered
+        roi (list or tuple): the region of interest in pixels (row_start, row_end, column_start, column_end)
     
+    Returns:
+        coords (ndarray): (N,2) array that is structured as (rows, columns) 
+    """
     if crop:
         array = array[roi[0]:roi[1], roi[2]:roi[3]]
         
     indices = np.where(array > mask_val)
+    
     coords = np.array([(int(i)+ roi[0], int(j)+roi[2]) for i, j in zip(indices[0], indices[1])])
 
     return coords

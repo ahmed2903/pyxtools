@@ -188,7 +188,6 @@ def plot_map_on_detector(detec_image, k_map, vmin, vmax, title, cmap, crop=False
     else:
         sx = 0
         sy = 0
-        
     
     if crop:
         detec_image = detec_image[sx:ex, sy:ey]    
@@ -208,9 +207,9 @@ def plot_map_on_detector(detec_image, k_map, vmin, vmax, title, cmap, crop=False
         
     # Add a white rectangle at each of the indices
     for idx in k_map:
-        rect_x = idx[1] - 1 - sy  # X-coordinate of the bottom-left corner
-        rect_y = idx[0] - 1 - sx # Y-coordinate of the bottom-left corner
-        rect = patches.Rectangle((rect_x, rect_y), rec_size, rec_size, linewidth=2, edgecolor=color, facecolor=color)
+        rect_row = idx[0] - 1 - sx  # row-coordinate of the bottom-left corner
+        rect_col = idx[1] - 1 - sy # col-coordinate of the bottom-left corner
+        rect = patches.Rectangle((rect_col, rect_row), rec_size, rec_size, linewidth=2, edgecolor=color, facecolor=color)
         ax.add_patch(rect)
 
     im = ax.imshow(detec_image, cmap=cmap,  vmin=vmin, vmax=vmax, origin = 'lower')

@@ -115,21 +115,21 @@ def reverse_kins_to_pixels(kins, pixel_size, detector_distance, central_pixel):
 
     #cen_x,cen_y = np.array(detector_shape)/2
 
-    cen_x, cen_y = np.array(central_pixel)
+    cen_row, cen_col = np.array(central_pixel)
     
     # pixel size in meters
     pixel_size = np.array(pixel_size)
     kins = kins / np.linalg.norm(kins, axis=1)[:, np.newaxis]
     
     # Reverse mapping to pixel indices
-    x_pixels = (kins[:, 0] / kins[:, 2]) * detector_distance / pixel_size + cen_x
-    y_pixels = (kins[:, 1] / kins[:, 2]) * detector_distance / pixel_size + cen_y
+    col_pixels = (kins[:, 0] / kins[:, 2]) * detector_distance / pixel_size + cen_col
+    row_pixels = (kins[:, 1] / kins[:, 2]) * detector_distance / pixel_size + cen_row
     
     # Convert to integer pixel indices
-    x_pixel_indices = np.floor(x_pixels).astype(int)
-    y_pixel_indices = np.floor(y_pixels).astype(int)
+    row_pixel_indices = np.floor(row_pixels).astype(int)
+    col_pixel_indices = np.floor(col_pixels).astype(int)
 
-    coord = np.vstack((x_pixel_indices, y_pixel_indices)).T
+    coord = np.vstack((row_pixel_indices, col_pixel_indices)).T
 
     return coord
     
@@ -140,8 +140,8 @@ def compute_vectors(coordinates, detector_distance, pixel_size, central_pixel, w
     Parameters:
     - coordinates: (N, 2) array of pixel indices (row, col).
     - detector_distance: Distance from origin to detector center.
-    - pixel_size: Pixel size.
-    - detector_shape: Tuple (num_rows, num_cols) of the detector.
+    - pixel_size: Pixel size [units] # FIX ME!
+    - central_pixel: Tuple (row, col) of the detector central pixel.
 
     Returns:
     - vectors: (N, 3) array of vectors from origin to each pixel.
@@ -151,15 +151,15 @@ def compute_vectors(coordinates, detector_distance, pixel_size, central_pixel, w
     #center_x = (num_x - 1) * pixel_size / 2
     #center_y = (num_y - 1) * pixel_size / 2
 
-    center_x, center_y = np.array(central_pixel) * pixel_size
+    center_row, center_col = np.array(central_pixel) * pixel_size
     
     vectors = []
     for coord in coordinates:
         i, j = coord
-        x = i * pixel_size - center_x
-        y = j * pixel_size - center_y
+        row = i * pixel_size - center_row
+        col = j * pixel_size - center_col
         
-        vector = np.array([x, y, detector_distance])
+        vector = np.array([col, row, detector_distance])
         vectors.append(vector)
 
     pixel_vectors = np.array(vectors)
