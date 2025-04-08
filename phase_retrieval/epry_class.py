@@ -14,11 +14,12 @@ from .plotting import plot_images_side_by_side, update_live_plot, initialize_liv
 
 class EPRy:
     
-    def __init__(self, images, pupil_func: str, kout_vec, lr_psize, 
+    def __init__(self, images, pupil_func: str, kout_vec, ks_pupil, lr_psize, 
                  num_iter=50, alpha=0.1, beta=0.1, hr_obj_image=None, hr_fourier_image=None):
         self.images = images
         self.pupil_func = pupil_func
         self.kout_vec = kout_vec
+        self.ks_pupil = ks_pupil
         self.lr_psize = lr_psize
         
         self.num_iter = num_iter
@@ -37,11 +38,16 @@ class EPRy:
 
         if 'zoom_factor' in kwargs:
             self.zoom_factor = kwargs['zoom_factor']
-        
+
+        if 'extend' in kwargs:
+            extend = kwargs['extend']
+        else:
+            extend = None
+            
         self._prep_images()
         
         self.kout_vec = np.array(self.kout_vec)
-        self.bounds_x, self.bounds_y, self.dks = prepare_dims(self.images, self.kout_vec, self.lr_psize, extend_to_double = False)
+        self.bounds_x, self.bounds_y, self.dks = prepare_dims(self.images, self.ks_pupil, self.lr_psize, extend = extend)
         self.kx_min_n, self.kx_max_n = self.bounds_x
         self.ky_min_n, self.ky_max_n = self.bounds_y
         self.dkx, self.dky = self.dks
@@ -59,16 +65,33 @@ class EPRy:
     def _load_pupil(self):
         
         dims = round((self.kx_max_n - self.kx_min_n)/self.dkx), round((self.ky_max_n - self.ky_min_n)/self.dky)
-
+        dims = make_dims_even(dims)
+        full_array = np.zeros(dims)
+        
         if isinstance(self.pupil_func, str):
             phase = np.load(self.pupil_func)
         elif isinstance(self.pupil_func, np.ndarray):
             phase = self.pupil_func
         else:
             phase = np.zeros(dims)
+        
+        # Get the scaling factors for each dimension
+        scale_x = dims[0] / phase.shape[0] / 2
+        scale_y = dims[1] / phase.shape[1] / 2 
 
-        phase = downsample_array(phase, dims)
-        self.pupil_func = np.exp(1j*phase)
+        # Scale the pupil phase array to match the required pupil dimensions
+        scaled_pupil_phase = zoom(phase, (scale_x, scale_y))
+
+        # Calculate center indices
+        N, M = dims[0]//2, dims[1]//2
+        
+        start_x, start_y = (dims[0] - N) // 2, (dims[1] - M) // 2
+        end_x, end_y = start_x + N, start_y + M
+    
+        # Set central region to ones
+        full_array[start_x:end_x, start_y:end_y] = scaled_pupil_phase
+        
+        self.pupil_func = np.exp(1j*full_array)
     
     def _initiate_recons_images(self):
         
@@ -195,16 +218,29 @@ class EPRy_lr(EPRy):
         image_FT *= self.nx_lr/self.nx_hr 
         
         image_lr = fftshift(ifft2(ifftshift(image_FT)))
-        image_lr_update = np.sqrt(image) * np.exp(1j * np.angle(image_lr))
+        image_lr_update = np.sqrt(np.abs(image)) * np.exp(1j * np.angle(image_lr))
         image_FT_update = fftshift(fft2(ifftshift(image_lr_update))) * ( 1/ (pupil_func_patch +1e-23))
         image_lr_update *= self.nx_hr/self.nx_lr
 
         weight_fac_pupil = self.alpha * self.compute_weight_fac(pupil_func_patch)
+
+        if np.any(np.isnan(np.sqrt(np.abs(image)))):
+            raise ValueError("There is a Nan value in np.sqrt(image), check the configurations ")
+        if np.any(np.isnan(np.angle(image_lr))):
+            raise ValueError("There is a Nan value in np.sqrt(image), check the configurations ")
+        if np.any(np.isnan(image_lr_update)):
+            raise ValueError("There is a Nan value in image_lr_update, check the configurations ")
         
+
+        
+            
         # Update fourier spectrum
         delta_lowres_ft = image_FT_update - image_FT
-        self.hr_fourier_image += delta_lowres_ft *  weight_fac_pupil
-
+        if np.any(np.isnan(delta_lowres_ft)):
+            raise ValueError("There is a Nan value in the delta_lowres_ft, check the configurations ")
+        
+        self.hr_fourier_image += delta_lowres_ft * weight_fac_pupil
+        
         if np.any(np.isnan(self.hr_fourier_image)):
             raise ValueError("There is a Nan value, check the configurations ")
             

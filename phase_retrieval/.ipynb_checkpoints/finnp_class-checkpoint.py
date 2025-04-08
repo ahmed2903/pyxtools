@@ -778,8 +778,13 @@ class FINN:
         
         tv_reg = self.tv_regularization(self.recon_obj_tensor)
         supp_loss = self.support_penalty(self.recon_obj_tensor)
-        
+
+        # Amplitude based Loss
         loss = self.loss_fn(torch.abs(low_resolution_image), torch.sqrt(torch.abs(image)))
+        
+        # Intensity based Loss
+        #loss = self.loss_fn(torch.abs(low_resolution_image)**2, torch.abs(image))
+        
         self.mse_loss += self.beta * loss
         self.tv_loss += tv_reg
         self.supp_loss += supp_loss            
