@@ -640,10 +640,13 @@ class load_data:
         sx,ex,sy,ey = region
         self.coherent_imgs[roi_name] = np.array(self.coherent_imgs[roi_name])
         if mode == 'zeros':
+            print("masking region by zeros")
             self.coherent_imgs[roi_name][:,sx:ex,sy:ey] = 0.0
         elif mode == 'median':
+            print("masking region by median")
             self.coherent_imgs[roi_name][:,sx:ex,sy:ey] = np.median(self.coherent_imgs[roi_name], axis = (1,2))[:,np.newaxis, np.newaxis]
         elif mode == 'ones':
+            print("masking region by ones")
             self.coherent_imgs[roi_name][:,sx:ex,sy:ey] = 1.0
     def align_coherent_images(self, roi_name):
         """Aligns a list of coherent images for a given region of interest (ROI).
@@ -1193,8 +1196,7 @@ class load_data:
     
         """
         self.make_coherent_images(roi_name=roi_name)
-        if mask_region is not None:
-            self.mask_region_cohimgs(roi_name, mask_region)
+        
             
         if variance_threshold is not None:
             self.filter_coherent_images(roi_name=roi_name, variance_threshold=variance_threshold)
@@ -1205,7 +1207,8 @@ class load_data:
             self.mask_cohimgs_threshold(roi_name=roi_name, threshold_value= mask_threshold)
         if background_sigma is not None:
             self.remove_coh_background(roi_name, background_sigma) 
-        
+        if mask_region is not None:
+            self.mask_region_cohimgs(roi_name, mask_region)
         self.even_dims_cohimages(roi_name=roi_name)
         if median_params is not None:
             self.apply_median_filter(roi_name, *median_params)

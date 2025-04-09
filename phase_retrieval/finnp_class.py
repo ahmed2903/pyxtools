@@ -13,7 +13,7 @@ from IPython.display import display, clear_output
 import multiprocessing as mp
 from functools import partial
 
-from .shrink_wrap import ShrinkWrap
+from .schedulars import ShrinkWrap, TVWeightScheduler
 from .utils_pr import *
 from .plotting import plot_images_side_by_side, plot_roi_from_numpy
 from tqdm.notebook import tqdm, trange
@@ -137,6 +137,7 @@ class FINN:
         self.grad_norms = {}
         self.debug = debug
         self.verbose = verbose
+        self.alpha=0
         
     def prepare(self, model,  extend_pupil = None, device = "cpu"):
 
@@ -457,7 +458,7 @@ class FINN:
         
         return tv
 
-    def set_tv_param(self, alpha):
+    def set_tv_param(self, start_epoch, increase_epochs, alpha_max, plat_epochs, gamma, min_alpha):
         """
         Initialize the alpha tv scheduler.
 
@@ -471,39 +472,14 @@ class FINN:
             gamma (float): Multiplicative factor for updating alpha. (Default = 1)
 
         """
-        self.alpha = alpha
-        
-    def update_alpha(self, epoch):
-        """
-        Update alpha based on the current epoch.
-    
-        This method updates the alpha parameter based on the current epoch. Initially, alpha is set to zero 
-        for the first n epochs. After that, it is set to the initial value (`alpha_init`), and every `alpha_steps` 
-        epochs, alpha is multiplied by a factor (`gamma`).
-
-        Args:
-            epoch (int): Current epoch number.
-
-        Returns:
-            float: Updated value of alpha.
-        """
-
-        if epoch < self.alpha_flag:
-            # First n epochs: alpha = 0
-            self.last_alpha_update = self.num_epochs
-            self.alpha = 0.0
-        elif epoch == self.alpha_flag:
-            # After n epochs: set alpha to alpha_init
-            self.alpha = self.alpha_init
-            self.last_alpha_update = epoch
-        
-        
-        elif (epoch > self.alpha_flag) and (
-            (epoch - self.last_alpha_update) >= self.alpha_steps
-        ):
-            
-            self.alpha *= self.gamma
-            self.last_alpha_update = epoch
+        self.tv_scheduler = TVWeightScheduler(
+                    start_epoch=start_epoch,
+                    increase_epochs=increase_epochs,
+                    alpha_max=alpha_max,
+                    plateau_epochs=plat_epochs,    
+                    gamma=gamma,
+                    min_alpha=min_alpha
+                    )
             
     ################################## Support Penalty ##################################
     def support_penalty(self, image):
@@ -641,7 +617,6 @@ class FINN:
         for epoch in tqdm(range(epochs), desc="Processing", total=epochs, unit="Epochs"):
             
             current_optimizer.zero_grad()
-            #self.epoch_loss = 0
             self.mse_loss = 0
             self.tv_loss = 0
             self.supp_loss = 0
@@ -649,13 +624,22 @@ class FINN:
             # Update Support 
             self.update_sw_support(self.epochs_passed)
 
-            for i, (image, kx_iter, ky_iter) in enumerate(zip(self.images, self.kin_vec[:, 0], self.kin_vec[:, 1])):    
+            self.alpha = self.tv_scheduler.get_alpha(epoch)
+            
+            for i, (image, kx_iter, ky_iter) in enumerate(zip(self.images, 
+                                                              self.kin_vec[:, 0], 
+                                                              self.kin_vec[:, 1])):    
                 # Forward Pass
                 self._process_image(image, kx_iter, ky_iter)
 
         
             # Compute gradients
-            self._compute_gradients()
+            # self._compute_gradients()
+            
+            
+            epoch_loss = self.mse_loss + self.alpha * self.tv_loss
+            epoch_loss.backward()
+            
             # Update Parameters
             current_optimizer.step()    
             current_schedular.step()
