@@ -132,6 +132,7 @@ class FINN:
         self.supp_losses = []
         self.main_losses = []
         self.sec_loss_fn = None
+        self.pupil_optimiser = None
         self.epochs_passed = 0
         self.num_epochs = 0 
         self.grad_norms = {}
@@ -202,6 +203,7 @@ class FINN:
 
         """
         self.images = np.array(self.images)
+        self.num_images = self.images.shape[0]
         self.image_dims = self.images[0].shape
         self.nx_lr, self.ny_lr = self.image_dims
         
@@ -357,7 +359,9 @@ class FINN:
         if not "lr" in optimiser_args:
             raise ValueError("Learning rate must be passed")
         
-        self.spectrum_optimiser = optimiser([self.model.spectrum_amp, self.model.spectrum_pha, self.model.pupil_amp, self.model.pupil_pha], **optimiser_args)
+        self.spectrum_optimiser = optimiser([self.model.spectrum_amp, self.model.spectrum_pha], 
+                                             #self.model.pupil_amp, self.model.pupil_pha], 
+                                            **optimiser_args)
         
     def set_pupil_optimiser(self, optimiser, freeze_pupil_amp = False, **kwargs):
         """
@@ -624,7 +628,7 @@ class FINN:
             # Update Support 
             self.update_sw_support(self.epochs_passed)
 
-            self.alpha = self.tv_scheduler.get_alpha(epoch)
+            self.alpha = self.tv_scheduler.get_alpha(self.epochs_passed)
             
             for i, (image, kx_iter, ky_iter) in enumerate(zip(self.images, 
                                                               self.kin_vec[:, 0], 
@@ -663,9 +667,9 @@ class FINN:
             
             
             # Update loss list
-            self.tv_losses.append(self.tv_loss.cpu().detach().numpy())
-            self.supp_losses.append(self.supp_loss.cpu().detach().numpy())
-            self.main_losses.append(self.mse_loss.cpu().detach().numpy())
+            self.tv_losses.append(self.tv_loss.cpu().detach().numpy() / self.num_images)
+            self.supp_losses.append(self.supp_loss.cpu().detach().numpy() / self.num_images)
+            self.main_losses.append(self.mse_loss.cpu().detach().numpy() / self.num_images)
         
             self.epochs_passed +=1
             
@@ -904,7 +908,7 @@ class FINN:
         #line_supp.set_xdata(range(self.epochs_passed))
         #line_supp.set_ydata(self.supp_losses)
         
-        ax.set_title(f"Epoch = {self.epochs_passed-1}, MSE Loss = {self.mse_loss:.2f}, TV Loss = {self.tv_loss:.2f}")
+        ax.set_title(f"Epoch = {self.epochs_passed-1}, MSE Loss = {self.mse_loss/self.num_images:.2f}, TV Loss = {self.tv_loss/self.num_images:.2f}")
         ax.set_yscale('log')
         ax.relim()
         ax.autoscale_view()
@@ -1081,11 +1085,12 @@ class FINN:
         }
 
         alpha_meta = {
-        "alpha_begin" : self.alpha,
-        "alpha_init": self.alpha_init,
-        "alpha_flag":self.alpha_flag,
-        "alpha_steps": self.alpha_steps ,
-        "gamma": self.gamma,
+        "Start Epoch" : self.tv_scheduler.start_epoch,
+        "Alpha Max": self.tv_scheduler.alpha_max,
+        "Increase Epochs": self.tv_scheduler.increase_epochs,
+        "Plateau Epochs": self.tv_scheduler.plateau_epochs,
+        "Gamma": self.tv_scheduler.gamma,
+        "Alpha Min": self.tv_scheduler.min_alpha
         }
         
 

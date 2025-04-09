@@ -237,3 +237,41 @@ def pad_to_double_parallel(image_list, n_jobs=8):
     
     )
     return padded_images
+
+################################################################################
+############################# Loss Function ####################################
+################################################################################
+
+def fourier_loss(reconstructed, measured):
+    fft_recon = torch.fft.fftshift(torch.fft.fft2(reconstructed))
+    fft_measured = torch.fft.fftshift(torch.fft.fft2(measured))
+
+    return torch.nn.MSELoss()(torch.abs(fft_recon), torch.abs(fft_measured))
+
+def intensity_correlation_loss(reconstructed, measured):
+    recon_intensity = torch.abs(reconstructed)
+    recon_mean = torch.mean(recon_intensity)
+    measured_mean = torch.mean(measured)
+
+    numerator = torch.sum((recon_intensity - recon_mean) * (measured - measured_mean))
+    denominator = torch.sqrt(torch.sum((recon_intensity - recon_mean) ** 2) * torch.sum((measured - measured_mean) ** 2) + 1e-6)
+
+    return 1 - numerator / denominator
+    
+def pcc_loss( output, target):
+    """
+    Pearson correlation coefficient.
+    """
+    x = torch.abs(output)
+    y = torch.abs(target)
+    vx = torch.abs(x - torch.mean(x))
+    vy = torch.abs(y - torch.mean(y))
+    loss = torch.mean(vx * vy) / (torch.sqrt(torch.mean(vx ** 2) * torch.mean(vy ** 2))+1e-40)
+    return 1.0 - loss
+
+def chi_loss(output, target):
+    """
+    Compute the chi squared error of two sets of data.
+    """
+    loss = torch.mean(torch.abs((output-target))**2)/(torch.mean(target**2)+1e-40)
+    return loss
