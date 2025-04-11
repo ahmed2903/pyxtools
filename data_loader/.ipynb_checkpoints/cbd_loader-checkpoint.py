@@ -82,6 +82,7 @@ class load_data:
         self.g_init = {}
         if self.beamtime == 'new':
             self.fnames = list_datafiles(self.dir)[:-2]        
+
         
     ################### Loading data ###################
     def make_4d_dataset(self, roi_name: str, mask_max_coh=False, mask_min_coh= False):
@@ -193,11 +194,6 @@ class load_data:
         else:
             self.det_psize *= stride
 
-        print(self.centre_pixel)
-        self.centre_pixel[0] = ( self.centre_pixel[0] + padding )/stride
-        self.centre_pixel[1] = ( self.centre_pixel[1] + padding )/stride
-        print(self.centre_pixel)
-        
     def normalise_detector(self, roi_name_ref, roi_name_op):
         """Normalizes the detector data based on the reference ROI's peak intensity.
 
@@ -1115,7 +1111,7 @@ class load_data:
             normalisation_roi (str, optional): The name of an ROI for normalization, if specified. Defaults to None.
         
         """
-        
+        print(self.centre_pixel)
         self.make_4d_dataset(roi_name=roi_name, mask_max_coh = mask_max_coh, mask_min_coh=mask_min_coh)
         if normalisation_roi is not None:
             self.normalise_detector(normalisation_roi, roi_name)
