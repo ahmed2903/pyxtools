@@ -270,25 +270,7 @@ def make_detector_image(data: np.ndarray, position_idx:np.ndarray):
 
     return detector_image
 
-def make_coordinates(array, mask_val, roi, crop=False):
 
-    """
-    Args:
-        array (ndarray): The array from which to calculate the coordinates. 
-        mask_val (float): Only pixels above this value will be considered
-        roi (list or tuple): the region of interest in pixels (row_start, row_end, column_start, column_end)
-    
-    Returns:
-        coords (ndarray): (N,2) array that is structured as (rows, columns) 
-    """
-    if crop:
-        array = array[roi[0]:roi[1], roi[2]:roi[3]]
-        
-    indices = np.where(array > mask_val)
-    
-    coords = np.array([(int(i)+ roi[0], int(j)+roi[2]) for i, j in zip(indices[0], indices[1])])
-
-    return coords
 
 
 @time_it   
@@ -894,7 +876,7 @@ def reorder_pixels_from_center(pixel_coords, connected_array=None):
         pixel_coords: List of (x, y) pixel coordinates.
 
     Returns:
-        list of tuples: Reordered pixel coordinates.
+        list of tuples: Indices of reordered pixel coordinates.
     """
     pixel_coords = np.array(pixel_coords)
 
@@ -915,3 +897,29 @@ def reorder_pixels_from_center(pixel_coords, connected_array=None):
     sorted_indices = np.array(sorted_indices, dtype=int)
     
     return sorted_indices
+
+def flip_images(images, flip_mode):
+    """
+    Flips images based on the selected mode.
+    
+    Args:
+        images (np.ndarray): A batch of images with shape (N, H, W).
+        flip_mode (str): The flipping mode, one of:
+                        - "xy"  (original)
+                        - "x_neg_y" (flip y-axis)
+                        - "neg_x_y" (flip x-axis)
+                        - "neg_x_neg_y" (flip both axes)
+
+    Returns:
+        np.ndarray: The transformed batch of images.
+    """
+    if flip_mode == "xy":
+        return images  # No flip
+    elif flip_mode == "x_neg_y":
+        return np.flip(images, axis=1)  # Flip along y-axis
+    elif flip_mode == "neg_x_y":
+        return np.flip(images, axis=2)  # Flip along x-axis
+    elif flip_mode == "neg_x_neg_y":
+        return np.flip(images, axis=(1, 2))  # Flip along both axes
+    else:
+        raise ValueError(f"Invalid flip_mode: {flip_mode}")

@@ -17,7 +17,7 @@ from IPython.display import display
 import concurrent
 
 from .data_fs import *
-from .kvectors import compute_vectors, optimise_kin, reverse_kins_to_pixels, rotation_matrix, calc_qvec, extract_parallel_line, extract_streak_region
+from .kvectors import make_coordinates, compute_vectors, optimise_kin, reverse_kins_to_pixels, rotation_matrix, calc_qvec, extract_parallel_line, extract_streak_region
 from .plotting import plot_roi_from_numpy, plot_pixel_space, plot_map_on_detector
 from .utils import time_it
 
@@ -192,6 +192,12 @@ class load_data:
             self.det_psize *= kernel_size
         else:
             self.det_psize *= stride
+
+        print(self.centre_pixel)
+        self.centre_pixel[0] = ( self.centre_pixel[0] + padding )/stride
+        self.centre_pixel[1] = ( self.centre_pixel[1] + padding )/stride
+        print(self.centre_pixel)
+        
     def normalise_detector(self, roi_name_ref, roi_name_op):
         """Normalizes the detector data based on the reference ROI's peak intensity.
 

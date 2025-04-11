@@ -100,6 +100,26 @@ def calc_qvec(kout, kin, **kwargs):
     
     return G_0
 
+def make_coordinates(array, mask_val, roi, crop=False):
+
+    """
+    Args:
+        array (ndarray): The array from which to calculate the coordinates. 
+        mask_val (float): Only pixels above this value will be considered
+        roi (list or tuple): the region of interest in pixels (row_start, row_end, column_start, column_end)
+    
+    Returns:
+        coords (ndarray): (N,2) array that is structured as (rows, columns) 
+    """
+    if crop:
+        array = array[roi[0]:roi[1], roi[2]:roi[3]]
+        
+    indices = np.where(array > mask_val)
+    
+    coords = np.array([(int(i)+ roi[0], int(j)+roi[2]) for i, j in zip(indices[0], indices[1])])
+
+    return coords
+
 def reverse_kins_to_pixels(kins, pixel_size, detector_distance, central_pixel):
     """
     Reverse map k_out vectors to detector pixel indices.
@@ -122,8 +142,8 @@ def reverse_kins_to_pixels(kins, pixel_size, detector_distance, central_pixel):
     kins = kins / np.linalg.norm(kins, axis=1)[:, np.newaxis]
     
     # Reverse mapping to pixel indices
-    col_pixels = (kins[:, 0] / kins[:, 2]) * detector_distance / pixel_size + cen_col
-    row_pixels = (kins[:, 1] / kins[:, 2]) * detector_distance / pixel_size + cen_row
+    row_pixels = (kins[:, 0] / kins[:, 2]) * detector_distance / pixel_size + cen_row
+    col_pixels = (kins[:, 1] / kins[:, 2]) * detector_distance / pixel_size + cen_col
     
     # Convert to integer pixel indices
     row_pixel_indices = np.floor(row_pixels).astype(int)
@@ -159,7 +179,7 @@ def compute_vectors(coordinates, detector_distance, pixel_size, central_pixel, w
         row = i * pixel_size - center_row
         col = j * pixel_size - center_col
         
-        vector = np.array([col, row, detector_distance])
+        vector = np.array([row, col, detector_distance])
         vectors.append(vector)
 
     pixel_vectors = np.array(vectors)
