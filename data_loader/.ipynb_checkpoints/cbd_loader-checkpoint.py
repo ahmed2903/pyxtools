@@ -47,13 +47,15 @@ class load_data:
         beamtime (str, optional): Identifier for the beamtime ('new' or 'old'). Defaults to 'new'.
         fast_axis_steps (optional): Step values for the fast axis in the scan. Defaults to None.
     """
-    def __init__(self, directory:str, scan_num: int, 
-                 
-                 det_psize:float, det_distance:float, 
-                 centre_pixel:tuple[int], wavelength:float, 
+    def __init__(self, directory:str, 
+                 scan_num: int, 
+                 det_psize:float, 
+                 det_distance:float, 
+                 centre_pixel:tuple[int], 
+                 wavelength:float, 
                  slow_axis:int, 
-                beamtime='new',
-                fast_axis_steps = None):
+                 beamtime='new',
+                 fast_axis_steps = None):
         
         
         self.det_psize = det_psize
@@ -126,6 +128,7 @@ class load_data:
             self.rois_dict (dict): The dictionary storing the ROIs with their names as keys and coordinates as values.
         """
         self.rois_dict[roi_name] = roi 
+        
     def average_frames_roi(self, roi_name):
         """Averages the frames of the dataset for a given region of interest (ROI).
 
@@ -165,7 +168,8 @@ class load_data:
             after applying the hot pixel mask (if `hot_pixels` is True).
         """
         if hot_pixels:
-            self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], mask_coh_img=self.mask_coh_img)
+            self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], 
+                                                          mask_coh_img=self.mask_coh_img)
     
     def pool_detector_space(self, roi_name, kernel_size, stride=None, padding=0):
         """Performs pooling on the detector space for a given region of interest (ROI).
@@ -187,13 +191,17 @@ class load_data:
             padding (int, optional): The amount of zero padding to add around the 
                                       edges of the image before pooling. Defaults to 0.
         """
+        print("Pooling detector ...")
+        self.ptychographs[roi_name] = sum_pool2d_array(self.ptychographs[roi_name], 
+                                                       kernel_size=kernel_size,
+                                                       stride=stride, padding=padding)
         
-        self.ptychographs[roi_name] = sum_pool2d_array(self.ptychographs[roi_name], kernel_size=kernel_size, stride=stride, padding=padding)
         if stride is None:
             self.det_psize *= kernel_size
         else:
             self.det_psize *= stride
-
+        print("Done.")
+        
     def normalise_detector(self, roi_name_ref, roi_name_op):
         """Normalizes the detector data based on the reference ROI's peak intensity.
 
@@ -220,6 +228,7 @@ class load_data:
         
         avg_intensity = np.mean(peak_intensity)
         self.ptychographs[roi_name_op] = self.ptychographs[roi_name_op]/peak_intensity[...,np.newaxis, np.newaxis] * avg_intensity
+        
     def mask_region_detector(self, roi_name, region, mode = 'zeros'):
         """Masks a specific region of the detector data within the given ROI.
 
@@ -268,7 +277,9 @@ class load_data:
     
         """
         self.kout_coords[roi_name] = make_coordinates(self.averaged_data[roi_name], mask_val, self.rois_dict[roi_name], crop=False)
-        self.kouts[roi_name] = compute_vectors(self.kout_coords[roi_name], self.det_distance, self.det_psize, self.centre_pixel, self.wavelength)
+
+        self.kouts[roi_name] = compute_vectors(self.kout_coords[roi_name], self.det_distance, 
+                                               self.det_psize, self.centre_pixel, self.wavelength)
         
     def compute_kins(self, roi_name, est_ttheta, method = "BFGS", gtol = 1e-6):
         """
@@ -295,7 +306,7 @@ class load_data:
             - `self.kin_coords[roi_name]`: Pixel coordinates corresponding to `self.kins[roi_name]`.
         """
 
-        if roi_name == 'pupil':
+        if roi_name == 'pupil' or est_ttheta == 0:
             self.kins[roi_name] = self.kouts[roi_name]
             self.kin_coords[roi_name] = self.kout_coords[roi_name]
             return 
