@@ -55,7 +55,8 @@ class load_data:
                  wavelength:float, 
                  slow_axis:int, 
                  beamtime='new',
-                 fast_axis_steps = None):
+                 fast_axis_steps = None,
+                 num_jobs = 32):
         
         
         self.det_psize = det_psize
@@ -65,7 +66,7 @@ class load_data:
         self.slow_axis = slow_axis
         self.beamtime = beamtime
         self.fast_axis_steps = fast_axis_steps
-
+        
         
         self.dir = f"{directory.rstrip('/')}/Scan_{scan_num}/" 
         if self.beamtime == 'old':
@@ -85,7 +86,7 @@ class load_data:
         if self.beamtime == 'new':
             self.fnames = list_datafiles(self.dir)[:-2]        
 
-        
+        self.num_jobs = num_jobs
     ################### Loading data ###################
     def make_4d_dataset(self, roi_name: str, mask_max_coh=False, mask_min_coh= False):
         
@@ -109,7 +110,8 @@ class load_data:
             self.ptychographs[roi_name] = stack_4d_data_old(self.dir, self.rois_dict[roi_name], self.fast_axis_steps, self.slow_axis)
             
         else:
-            self.ptychographs[roi_name] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name], slow_axis = self.slow_axis, conc=True)
+            self.ptychographs[roi_name] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name], 
+                                                        slow_axis = self.slow_axis, conc=True, num_jobs=self.num_jobs)
         
         self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], mask_max_coh = mask_max_coh, mask_min_coh=mask_min_coh)
     
@@ -145,7 +147,7 @@ class load_data:
             after applying the hot pixel mask.
         """
         self.averaged_data[roi_name] = np.mean(self.ptychographs[roi_name], axis=(0,1))
-        self.averaged_data[roi_name] =  mask_hot_pixels(self.averaged_data[roi_name])
+        #self.averaged_data[roi_name] =  mask_hot_pixels(self.averaged_data[roi_name])
         
     def mask_hotpixels_roi(self, roi_name, hot_pixels = True, mask_val=1):
         """Applies a mask to the region of interest (ROI) to remove hot pixels.
@@ -222,14 +224,14 @@ class load_data:
         try:
             peak_intensity = np.sum(self.ptychographs[roi_name_ref], axis=(-2,-1))
         except: 
-            self.ptychographs[roi_name_ref] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name_ref], conc=True)
+            self.ptychographs[roi_name_ref] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name_ref], conc=True, num_jobs = self.num_jobs)
             self.ptychographs[roi_name_ref] = mask_hot_pixels(self.ptychographs[roi_name_ref])
             peak_intensity = np.sum(self.ptychographs[roi_name_ref], axis=(-2,-1))
         
         avg_intensity = np.mean(peak_intensity)
         self.ptychographs[roi_name_op] = self.ptychographs[roi_name_op]/peak_intensity[...,np.newaxis, np.newaxis] * avg_intensity
         
-    def mask_region_detector(self, roi_name, region, mode = 'zeros'):
+    def mask_region_detector(self, roi_name, region, mode = 'median'):
         """Masks a specific region of the detector data within the given ROI.
 
         This method applies a median mask to a specified region within the detector data 
@@ -429,7 +431,7 @@ class load_data:
 
             coherent_imgs.append(make_coherent_image(self.ptychographs[roi_name], np.array([xp,yp])))
 
-        self.coherent_imgs[roi_name] = np.array(coherent_imgs).copy()
+        self.coherent_imgs[roi_name] = np.array(coherent_imgs)
         
     def filter_coherent_images(self, roi_name:str, variance_threshold):
         """Filters coherent images based on variance threshold.
@@ -473,7 +475,7 @@ class load_data:
                            blurring fine details.
         """
         
-        self.coherent_imgs[roi_name] = remove_background_parallel(self.coherent_imgs[roi_name], sigma=sigma)
+        self.coherent_imgs[roi_name] = remove_background_parallel(self.coherent_imgs[roi_name], sigma=sigma, n_jobs=self.num_jobs)
     
     def even_dims_cohimages(self, roi_name):
         """Adjusts the dimensions of coherent images to be even.
@@ -488,7 +490,7 @@ class load_data:
     
         """
         
-        self.coherent_imgs[roi_name] = make_2dimensions_even(self.coherent_imgs[roi_name])
+        self.coherent_imgs[roi_name] = make_2dimensions_even(self.coherent_imgs[roi_name], num_jobs=self.num_jobs)
     def order_pixels(self, roi_name):
         """Reorders the pixels of coherent images and corresponding k-vectors based on their distance from the center.
     
@@ -546,7 +548,7 @@ class load_data:
                                                               kernel_size = kernel_size, 
                                                               stride = stride, 
                                                               threshold=threshold, 
-                                                              n_jobs=32)
+                                                              n_jobs=self.num_jobs)
     def apply_bilateral_filter(self, roi_name, sigma_spatial, sigma_range, kernel_size):
         """Applies a bilateral filter to the coherent images for a given region of interest (ROI).
 
@@ -567,7 +569,7 @@ class load_data:
             kernel_size (int): The size of the square kernel to be used for the bilateral 
                             filter. A larger kernel size will result in stronger filtering.
     """
-        self.coherent_imgs[roi_name] = bilateral_filter_parallel(self.coherent_imgs[roi_name], sigma_spatial, sigma_range, kernel_size)
+        self.coherent_imgs[roi_name] = bilateral_filter_parallel(self.coherent_imgs[roi_name], sigma_spatial, sigma_range, kernel_size, n_jobs=self.num_jobs)
     def detect_object(self, roi_name, threshold, min_val, max_val):
         """Detects objects within the specified region of interest (ROI) and filters based on intensity.
 
@@ -584,7 +586,7 @@ class load_data:
             max_val (float): The maximum intensity threshold for filtering detected objects.
     
         """
-        self.images_object[roi_name] = detect_obj_parallel(self.coherent_imgs[roi_name], threshold=threshold)
+        self.images_object[roi_name] = detect_obj_parallel(self.coherent_imgs[roi_name], threshold=threshold, n_jobs=self.num_jobs)
         
         
         mask = [np.sum(im) > min_val and np.sum(im) < max_val for im in self.images_object[roi_name]]
@@ -1207,7 +1209,7 @@ class load_data:
         """
         self.make_coherent_images(roi_name=roi_name)
         if mask_region is not None:
-            self.mask_region_cohimgs(roi_name, mask_region)
+            self.mask_region_cohimgs(roi_name, mask_region, mode = 'median')
             
         if variance_threshold is not None:
             self.filter_coherent_images(roi_name=roi_name, variance_threshold=variance_threshold)

@@ -1,15 +1,21 @@
 import numpy as np
 import time
 from tqdm.notebook import tqdm, trange
+
+    
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import concurrent.futures
+from joblib import Parallel, delayed
+
+from multiprocessing import Pool
+
+
 import h5py
 import os
 from skimage.measure import shannon_entropy
 from numpy.fft import fftshift, ifftshift, fft2, ifft2
 from scipy.ndimage import zoom 
-from joblib import Parallel, delayed
 import torch 
 import torch.nn.functional as F
 from skimage.registration import phase_cross_correlation
@@ -23,12 +29,12 @@ import scipy.fft
 from .utils import time_it
 
 ################# Load Data #################
-
-def load_hdf_roi(data_folder, f_name, roi):
+    
+def load_hdf_roi(args):
     """
     loads the data from a h5 file into a numpy array for a region of interest
     """
-    
+    data_folder, f_name, roi = args
     file_path = data_folder + "/" + f_name
     
     with h5py.File(file_path,'r') as f:
@@ -36,7 +42,7 @@ def load_hdf_roi(data_folder, f_name, roi):
         data = f['/entry/data/data'][:,roi[0]:roi[1], roi[2]:roi[3]]
         
     return data
-
+    
 def load_hdf(data_folder, f_name):
     """
     loads the data from a h5 file into a numpy array for a region of interest
@@ -72,7 +78,7 @@ def average_data_old(file_path,roi):
     return data
 
 @time_it 
-def average_data(data_folder, names_array, roi, conc=False):
+def average_data(data_folder, names_array, roi, conc=False, num_jobs=16):
     
     """
     averages all the data in a NxM scan
@@ -84,11 +90,15 @@ def average_data(data_folder, names_array, roi, conc=False):
     
     nx = roi[1] - roi[0] # roi vertical size
     ny = roi[3] - roi[2] # roi horizontal size
+
+    args_list = [(data_folder, name, roi) for name in names_array]
     
     if conc: 
-        with concurrent.futures.ProcessPoolExecutor() as executor:
-            all_data = list(executor.map(load_hdf_roi, [data_folder]*len(names_array), names_array, [roi]*len(names_array)))
-
+        #with concurrent.futures.ProcessPoolExecutor() as executor:
+        #    all_data = list(executor.map(load_hdf_roi, [data_folder]*len(names_array), names_array, [roi]*len(names_array)))
+        with Pool(processes=num_jobs) as pool:
+            all_data = list(pool.imap(load_hdf_roi, args_list))
+    
     else: 
         all_data = []
         for i in range(len(names_array)):
@@ -98,7 +108,6 @@ def average_data(data_folder, names_array, roi, conc=False):
     stacked_data = np.concatenate(all_data,axis=0)
     average_data = np.mean(stacked_data, axis=0)
 
-    
     return average_data
 
 @time_it   
@@ -111,7 +120,7 @@ def stack_data(data_folder, names_array, roi, conc = True):
     
     nx = roi[1] - roi[0] # roi vertical size
     ny = roi[3] - roi[2] # roi horizontal size
-
+    
     if conc:
         with concurrent.futures.ProcessPoolExecutor() as executor:
             all_data = list(executor.map(load_hdf_roi, [data_folder]*len(names_array), names_array, [roi]*len(names_array)))
@@ -126,17 +135,18 @@ def stack_data(data_folder, names_array, roi, conc = True):
     return stacked_data
     
 @time_it 
-def stack_4d_data(data_folder,names_array,roi, slow_axis = 0, conc = False):
+def stack_4d_data(data_folder,names_array,roi, slow_axis = 0, conc = False, num_jobs = 4):
 
     
     nx = roi[1] - roi[0] # roi vertical size
     ny = roi[3] - roi[2] # roi horizontal size
     
-
+    args_list = [(data_folder, name, roi) for name in names_array]
     if conc:
-        with concurrent.futures.ProcessPoolExecutor() as executor:
-            all_data = list(executor.map(load_hdf_roi, [data_folder]*len(names_array), names_array, [roi]*len(names_array)))
-
+        #with concurrent.futures.ProcessPoolExecutor() as executor:
+        #    all_data = list(executor.map(load_hdf_roi, [data_folder]*len(names_array), names_array, [roi]*len(names_array)))
+        with Pool(processes=num_jobs) as pool:
+            all_data = list(pool.imap(load_hdf_roi, args_list))        
     else:
         all_data = []
         for i in range(len(names_array)):
@@ -169,6 +179,7 @@ def print_hdf5_keys(file_path):
         # Traverse the file and print all keys
         print(f"Keys in {file_path}:")
         f.visititems(print_keys)
+
 @time_it        
 def stack_4d_data_old(file_path,roi, fast_axis_steps, slow_axis = 0):
 
@@ -383,7 +394,7 @@ def downsample_array(arr, new_shape):
     
     return downsampled
 
-def make_2dimensions_even(array_list):
+def make_2dimensions_even(array_list, num_jobs):
     """
     Takes a list of NumPy arrays and ensures that all arrays have even dimensions.
     If either dimension is odd, the array is padded at the end to make it even.
@@ -411,7 +422,7 @@ def make_2dimensions_even(array_list):
         padded_array = np.pad(array, padding, mode='median')
         return padded_array
         
-    padded_arrays = Parallel(n_jobs=4)(delayed(process_array)(arr) for arr in array_list)
+    padded_arrays = Parallel(n_jobs=num_jobs)(delayed(process_array)(arr) for arr in array_list)
     
     return np.array(padded_arrays)
 
