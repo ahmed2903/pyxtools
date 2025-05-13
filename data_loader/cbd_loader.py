@@ -67,23 +67,30 @@ class load_data:
         self.beamtime = beamtime
         self.fast_axis_steps = fast_axis_steps
         
-        
+
+        # Writing the directory of the selected scan number
         self.dir = f"{directory.rstrip('/')}/Scan_{scan_num}/" 
+        
         if self.beamtime == 'old':
+            # Just for naming
             self.dir = f"{self.dir.rstrip('/')}/Scan_{scan_num}_data_000001.h5"
+            
         self.scan_num = scan_num
         self.rois_dict = {}
-        self.ptychographs = {}
-        self.averaged_data = {}
-        self.images_object = {}
-        self.kout_coords = {}
-        self.kouts = {}
-        self.kins = {}
-        self.kin_coords = {}
-        self.coherent_imgs = {}
-        self.optimal_angles = {}
-        self.g_init = {}
-        if self.beamtime == 'new':
+        self.ptychographs = {} # 4D Data set (x, y, fx, fy)
+        self.averaged_data = {} # Average of all detector frames 
+        self.images_object = {} # Detected Objects
+        self.kout_coords = {} # Coords
+        self.kouts = {} # Kout vectors
+        self.kins = {} # Kin vectors
+        self.kin_coords = {} # Coords
+        self.coherent_imgs = {} 
+        self.optimal_angles = {} # Euler angles that rotate Kout to Kin
+        self.g_init = {} # Initial G vector for a Signal
+        
+        if self.beamtime == 'new': # Data structure 
+            # New = 1 File per scan line
+            # Old = 1 File for all
             self.fnames = list_datafiles(self.dir)[:-2]        
 
         self.num_jobs = num_jobs
@@ -107,13 +114,22 @@ class load_data:
         if self.beamtime == 'old':
             if self.fast_axis_steps is None:
                 raise ValueError("fast_axis_steps is required")
-            self.ptychographs[roi_name] = stack_4d_data_old(self.dir, self.rois_dict[roi_name], self.fast_axis_steps, self.slow_axis)
+            self.ptychographs[roi_name] = stack_4d_data_old(self.dir, 
+                                                            self.rois_dict[roi_name], 
+                                                            self.fast_axis_steps, 
+                                                            self.slow_axis)
             
         else:
-            self.ptychographs[roi_name] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name], 
-                                                        slow_axis = self.slow_axis, conc=True, num_jobs=self.num_jobs)
+            self.ptychographs[roi_name] = stack_4d_data(self.dir, 
+                                                        self.fnames, 
+                                                        self.rois_dict[roi_name], 
+                                                        slow_axis = self.slow_axis, 
+                                                        conc=True, 
+                                                        num_jobs=self.num_jobs)
         
-        self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], mask_max_coh = mask_max_coh, mask_min_coh=mask_min_coh)
+        self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], 
+                                                      mask_max_coh = mask_max_coh, 
+                                                      mask_min_coh=mask_min_coh)
     
     ################### prepare detector roi ###################
     def add_roi(self, roi_name:str , roi:list):
