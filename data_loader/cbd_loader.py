@@ -373,7 +373,7 @@ class load_data:
 
         """
         mask = extract_parallel_line(self.kin_coords[roi_name], width=width, position=position, offset=offset)
-
+        
         self.kins[roi_name] = self.kins[roi_name][mask]
         self.kin_coords[roi_name] = self.kin_coords[roi_name][mask]
         self.kouts[roi_name] = self.kouts[roi_name][mask]
