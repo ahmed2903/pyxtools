@@ -100,6 +100,12 @@ class load_data:
     
     ################### Checkpointing ##################
     def checkpoint_state(self):
+        """Create a deep copy of the current data state for potential rollback.
+
+        This method saves the current state of all main data dictionaries 
+        (`kins`, `kouts`, `kin_coords`, `kout_coords`) by creating deep copies.
+        It allows restoring this exact state later using `restore_checkpoint()`.
+        """
         state = {
             'kins': copy.deepcopy(self.kins),
             'kouts': copy.deepcopy(self.kouts),
@@ -113,6 +119,14 @@ class load_data:
         print(f"Checkpoint #{len(self._checkpoint_stack)} created.")
     
     def restore_checkpoint(self):
+        """Restore the most recently saved checkpoint.
+
+        Replaces the current data state with the previously saved checkpoint.
+        This effectively undoes any operations performed since the last 
+        `checkpoint_state()` call.
+
+        If no checkpoint has been saved, this method prints a warning and does nothing.
+        """
         if not self._checkpoint_stack:
             print("No checkpoints to restore.")
             return
