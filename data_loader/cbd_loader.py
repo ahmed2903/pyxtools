@@ -9,6 +9,7 @@ import h5py
 import matplotlib.pyplot as plt
 import os
 import time
+import copy
 
 from matplotlib.patches import Rectangle
 
@@ -94,6 +95,44 @@ class load_data:
             self.fnames = list_datafiles(self.dir)[:-2]        
 
         self.num_jobs = num_jobs
+        
+        self._checkpoint_stack = []
+    
+    ################### Checkpointing ##################
+    def checkpoint_state(self):
+        state = {
+            'kins': copy.deepcopy(self.kins),
+            'kouts': copy.deepcopy(self.kouts),
+            'kin_coords': copy.deepcopy(self.kin_coords),
+            'kout_coords': copy.deepcopy(self.kout_coords),
+            'coherent_images': copy.deepcopy(self.coherent_imgs),
+            'optimal_angles': copy.deepcopy(self.optimal_angles),
+            'images_object': copy.deepcopy(self.images_object)
+        }
+        self._checkpoint_stack.append(state)
+        print(f"Checkpoint #{len(self._checkpoint_stack)} created.")
+    
+    def restore_checkpoint(self):
+        if not self._checkpoint_stack:
+            print("No checkpoints to restore.")
+            return
+        state = self._checkpoint_stack.pop()
+        self.kins = copy.deepcopy(state['kins'])
+        self.kouts = copy.deepcopy(state['kouts'])
+        self.kin_coords = copy.deepcopy(state['kin_coords'])
+        self.kout_coords = copy.deepcopy(state['kout_coords'])
+        self.coherent_imgs = copy.deepcopy(state['coherent_images'])
+        self.optimal_angles = copy.deepcopy(state['optimal_angles'])
+        self.images_object = copy.deepcopy(state['images_object'])
+        
+        print("Restored to previous checkpoint.")
+    
+    def auto_checkpoint(func):
+        def wrapper(self, *args, **kwargs):
+            self.checkpoint_state()
+            return func(self, *args, **kwargs)
+        return wrapper
+    
     ################### Loading data ###################
     def make_4d_dataset(self, roi_name: str, mask_max_coh=False, mask_min_coh= False):
         
