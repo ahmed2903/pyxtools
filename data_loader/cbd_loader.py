@@ -1404,6 +1404,9 @@ class load_data:
                                   data=np.mean(self.coherent_imgs, axis=0),compression="gzip")
             try:
                 images.create_dataset("averaged_full_detector", data=self.averaged_data['full_det'])
+            except:
+                print("No averaged full detector to save")
+                
             kvectors = h5f.create_group("kvectors")
             kvectors.create_dataset("kins", data=self.kins[roi_name], compression="gzip")
             kvectors.create_dataset("kouts", data = self.kouts[roi_name], compression='gzip')
