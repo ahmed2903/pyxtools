@@ -9,6 +9,10 @@ import h5py
 import matplotlib.pyplot as plt
 import os
 import time
+import copy
+from tqdm.notebook import tqdm
+from functools import wraps
+import json
 
 from matplotlib.patches import Rectangle
 
@@ -20,6 +24,7 @@ from .data_fs import *
 from .kvectors import make_coordinates, compute_vectors, optimise_kin, reverse_kins_to_pixels, rotation_matrix, calc_qvec, extract_parallel_line, extract_streak_region
 from .plotting import plot_roi_from_numpy, plot_pixel_space, plot_map_on_detector
 from .utils import time_it
+from .geometry import *
 
 try:
     import ipywidgets as widgets
@@ -66,7 +71,16 @@ class load_data:
         self.slow_axis = slow_axis
         self.beamtime = beamtime
         self.fast_axis_steps = fast_axis_steps
-        
+
+        self.exp_params = {
+            'scan_num' : scan_num,
+            'det_psize': det_psize,
+            'det_distance' : det_distance,
+            'centre_pixe' : centre_pixel,
+            'wavelength' : wavelength, 
+            'slow_axis' : slow_axis, 
+            'fast_axis_steps' : fast_axis_steps
+        }
 
         # Writing the directory of the selected scan number
         self.dir = f"{directory.rstrip('/')}/Scan_{scan_num}/" 
@@ -79,6 +93,7 @@ class load_data:
         self.rois_dict = {}
         self.ptychographs = {} # 4D Data set (x, y, fx, fy)
         self.averaged_data = {} # Average of all detector frames 
+        self.averaged_coherent_images = {}
         self.images_object = {} # Detected Objects
         self.kout_coords = {} # Coords
         self.kouts = {} # Kout vectors
@@ -87,6 +102,12 @@ class load_data:
         self.coherent_imgs = {} 
         self.optimal_angles = {} # Euler angles that rotate Kout to Kin
         self.g_init = {} # Initial G vector for a Signal
+        self.det_average = None
+
+        self.lens_params = {}
+        
+        self.log_roi_params = {} # Logs the processing parameters for each method called per roi
+        self.log_params = [] # Logs the processing parameters for the general methods called 
         
         if self.beamtime == 'new': # Data structure 
             # New = 1 File per scan line
@@ -94,6 +115,109 @@ class load_data:
             self.fnames = list_datafiles(self.dir)[:-2]        
 
         self.num_jobs = num_jobs
+        
+        self._checkpoint_stack = []
+        
+        self.averaged_data["full_det"] = None
+        self.rois_dict["full_det"] = [0,-1,0,-1]
+        
+    ################### Checkpointing ##################
+    def checkpoint_state(self):
+        """Create a deep copy of the current data state for potential rollback.
+
+        This method saves the current state of all main data dictionaries 
+        (`kins`, `kouts`, `kin_coords`, `kout_coords`) by creating deep copies.
+        It allows restoring this exact state later using `restore_checkpoint()`.
+        """
+        state = {
+            'kins': copy.deepcopy(self.kins),
+            'kouts': copy.deepcopy(self.kouts),
+            'kin_coords': copy.deepcopy(self.kin_coords),
+            'kout_coords': copy.deepcopy(self.kout_coords),
+            'coherent_images': copy.deepcopy(self.coherent_imgs),
+            'optimal_angles': copy.deepcopy(self.optimal_angles),
+            'images_object': copy.deepcopy(self.images_object)
+        }
+        self._checkpoint_stack.append(state)
+        print(f"Checkpoint #{len(self._checkpoint_stack)} created.")
+    
+    def restore_checkpoint(self):
+        """Restore the most recently saved checkpoint.
+
+        Replaces the current data state with the previously saved checkpoint.
+        This effectively undoes any operations performed since the last 
+        `checkpoint_state()` call.
+
+        If no checkpoint has been saved, this method prints a warning and does nothing.
+        """
+        if not self._checkpoint_stack:
+            print("No checkpoints to restore.")
+            return
+        state = self._checkpoint_stack.pop()
+        self.kins = copy.deepcopy(state['kins'])
+        self.kouts = copy.deepcopy(state['kouts'])
+        self.kin_coords = copy.deepcopy(state['kin_coords'])
+        self.kout_coords = copy.deepcopy(state['kout_coords'])
+        self.coherent_imgs = copy.deepcopy(state['coherent_images'])
+        self.optimal_angles = copy.deepcopy(state['optimal_angles'])
+        self.images_object = copy.deepcopy(state['images_object'])
+        
+        print("Restored to previous checkpoint.")
+    
+    def auto_checkpoint(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            self.checkpoint_state()
+            return func(self, *args, **kwargs)
+        return wrapper
+
+    def log_params(func):
+        """Decorator that logs function name and input parameters."""
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            log_entry = {
+                'function': func.__name__,
+                'args': args,
+                'kwargs': kwargs
+            }
+            self.log_params.append(log_entry)
+            return func(*args, **kwargs)
+        return wrapper
+
+    def log_roi_params(func):
+        """
+        Decorator for class methods that logs function calls and parameters per ROI.
+        Assumes all methods have `roi_name` as the first positional argument after `self`
+        """
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            # Get roi_name (first arg after self)
+            if len(args) < 1 and 'roi_name' not in kwargs:
+                raise ValueError("Missing required 'roi_name' argument as first positional argument after 'self'")
+        
+            mod_kwargs = kwargs.copy()
+            
+            try:
+                roi_name = args[0]
+            except:
+                roi_name = kwargs['roi_name']
+                mod_kwargs.pop("roi_name")
+                assert len(args) == 0 
+                
+            if roi_name not in self.log_roi_params:
+                self.log_roi_params[roi_name] = []
+        
+            entry = {
+                "function": func.__name__,
+                "args": args[1:],  
+                "kwargs": mod_kwargs
+            }
+            self.log_roi_params[roi_name].append(entry)
+        
+            return func(self, *args, **kwargs)
+    
+        return wrapper
+        
     ################### Loading data ###################
     def make_4d_dataset(self, roi_name: str, mask_max_coh=False, mask_min_coh= False):
         
@@ -130,8 +254,77 @@ class load_data:
         self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], 
                                                       mask_max_coh = mask_max_coh, 
                                                       mask_min_coh=mask_min_coh)
+    @log_params
+    def estimate_pupil_size(self, mask_val):
+        """
+        Estimates the pupil size from the averaged pupil data and updates the instance attribute.
+    
+        Args:
+            mask_val (float or int): A threshold value used to mask or filter the pupil data
+                before estimating its size.
+        
+        Updates:
+            self.pupil_size: The estimated pupil size, computed using the averaged pupil data
+            and the given mask threshold.
+        """
+        self.pupil_size = estimate_pupil_size(self.averaged_data["pupil"], 
+                           mask_val=mask_val,
+                           pixel_size=self.det_psize)
+
+    def add_lens(self, lens_name:str, focal_length:float, height:float):
+        """
+        Adds a lens with given parameters to the internal lens parameter dictionary.
+    
+        Args:
+            lens_name (str): The name/key to identify the lens.
+            focal_length (float): The focal length of the lens in microns.
+            height (float): The physical aperture height of the lens in microns.
+        
+        Updates:
+            self.lens_params: Adds a dictionary entry containing focal length, height,
+            and calculated numerical aperture (NA) under the given lens name.
+        """
+        lens_na = calculate_NA(focal_length, height)
+
+        self.lens_params[lens_name] = {
+            'lens_focal_length': focal_length,
+            'lens_height': height,
+            'lens_na': lens_na
+        }
+
+    
+    def estimate_detector_distance_from_NA(self):
+        """
+        Estimates the average detector distance based on the range of numerical apertures (NA)
+        from the added lenses and current pupil size.
+    
+        The function identifies the smallest and largest NA values from the lens parameters,
+        computes detector distances corresponding to the minimum and maximum pupil sizes,
+        and averages them to determine a representative detector distance.
+    
+        Updates:
+            self.det_distance: Estimated detector distance in microns based on optical geometry.
+        """
+        largest_na = 0
+        smallest_na = 1e4
+        
+        for key, val in self.lens_params:
+
+            na = val['lens_na']
+            largest_na = max(largest_na, na)
+            smallest_na = min(smallest_na, na)    
+        
+        distance1 = compute_detector_distance_from_NA(largest_na, max(self.pupil_size))
+        distance2 = compute_detector_distance_from_NA(smallest_na, min(self.pupil_size))
+
+        print(f"First detector distance is {distance1} microns")
+        print(f"Second detector distance is {distance2} mircons")
+        
+        self.det_distance = (distance1+distance2)/2
+        self.exp_params['det_distance'] = self.det_distance
     
     ################### prepare detector roi ###################
+    @log_roi_params
     def add_roi(self, roi_name:str , roi:list):
         """Adds a region of interest (ROI) to the dictionary.
 
@@ -163,7 +356,7 @@ class load_data:
             after applying the hot pixel mask.
         """
         self.averaged_data[roi_name] = np.mean(self.ptychographs[roi_name], axis=(0,1))
-        #self.averaged_data[roi_name] =  mask_hot_pixels(self.averaged_data[roi_name])
+        self.averaged_coherent_images[roi_name] =  np.mean(self.ptychographs[roi_name], axis=(2,3))
         
     def mask_hotpixels_roi(self, roi_name, hot_pixels = True, mask_val=1):
         """Applies a mask to the region of interest (ROI) to remove hot pixels.
@@ -188,7 +381,7 @@ class load_data:
         if hot_pixels:
             self.ptychographs[roi_name] = mask_hot_pixels(self.ptychographs[roi_name], 
                                                           mask_coh_img=self.mask_coh_img)
-    
+    @log_roi_params
     def pool_detector_space(self, roi_name, kernel_size, stride=None, padding=0):
         """Performs pooling on the detector space for a given region of interest (ROI).
 
@@ -219,8 +412,8 @@ class load_data:
         else:
             self.det_psize *= stride
         print("Done.")
-        
-    def normalise_detector(self, roi_name_ref, roi_name_op):
+    @log_roi_params    
+    def normalise_detector(self, roi_name, reference_roi):
         """Normalizes the detector data based on the reference ROI's peak intensity.
 
         This method normalizes the ptychograph data for a given ROI (region of interest) 
@@ -234,19 +427,19 @@ class load_data:
         Args:
             roi_name_ref (str): The name of the reference region of interest (ROI) used 
                                  for calculating the peak intensity.
-            roi_name_op (str): The name of the operating region of interest (ROI) to be normalized.
+            roi_name (str): The name of the operating region of interest (ROI) to be normalized.
     
         """
         try:
             peak_intensity = np.sum(self.ptychographs[roi_name_ref], axis=(-2,-1))
         except: 
-            self.ptychographs[roi_name_ref] = stack_4d_data(self.dir, self.fnames, self.rois_dict[roi_name_ref], conc=True, num_jobs = self.num_jobs)
-            self.ptychographs[roi_name_ref] = mask_hot_pixels(self.ptychographs[roi_name_ref])
+            self.ptychographs[reference_roi] = stack_4d_data(self.dir, self.fnames, self.rois_dict[reference_roi], conc=True, num_jobs = self.num_jobs)
+            self.ptychographs[reference_roi] = mask_hot_pixels(self.ptychographs[reference_roi])
             peak_intensity = np.sum(self.ptychographs[roi_name_ref], axis=(-2,-1))
         
         avg_intensity = np.mean(peak_intensity)
-        self.ptychographs[roi_name_op] = self.ptychographs[roi_name_op]/peak_intensity[...,np.newaxis, np.newaxis] * avg_intensity
-        
+        self.ptychographs[roi_name] = self.ptychographs[roi_name]/peak_intensity[...,np.newaxis, np.newaxis] * avg_intensity
+    @log_roi_params
     def mask_region_detector(self, roi_name, region, mode = 'median'):
         """Masks a specific region of the detector data within the given ROI.
 
@@ -278,7 +471,7 @@ class load_data:
     
     
     ################### Compute k_in vectors ###################
-    
+    @log_roi_params
     def make_kouts(self, roi_name, mask_val):
         """Computes the k-space vectors for a given region of interest (ROI).
 
@@ -298,7 +491,7 @@ class load_data:
 
         self.kouts[roi_name] = compute_vectors(self.kout_coords[roi_name], self.det_distance, 
                                                self.det_psize, self.centre_pixel, self.wavelength)
-        
+    @log_roi_params
     def compute_kins(self, roi_name, est_ttheta, method = "BFGS", gtol = 1e-6):
         """
         Computes the incident wavevectors (kins) for a given region of interest (ROI) 
@@ -348,7 +541,7 @@ class load_data:
         self.kins[roi_name], self.optimal_angles[roi_name] = optimise_kin(self.g_init[roi_name], est_ttheta, self.kouts[roi_name], self.wavelength, method, gtol)
         
         self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], self.det_psize, self.det_distance, self.centre_pixel)
-    
+    @log_roi_params
     def refine_kins(self, roi_name, shifts):
         """
         Refine the estimated incident wavevectors (kins) by adjusting the optimal angles.
@@ -371,7 +564,7 @@ class load_data:
         kin_opt *= 2*np.pi/self.wavelength
         self.kins[roi_name] = kin_opt
         self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], self.det_psize, self.det_distance, self.centre_pixel)
-
+    @log_roi_params
     def select_single_pixel_streak(self, roi_name, width=1, position='center', offset=0):
 
         """
@@ -394,7 +587,7 @@ class load_data:
         self.kin_coords[roi_name] = self.kin_coords[roi_name][mask]
         self.kouts[roi_name] = self.kouts[roi_name][mask]
         self.kout_coords[roi_name] = self.kout_coords[roi_name][mask]
-
+    @log_roi_params
     def select_streak_region(self, roi_name, percentage=10, start_position='lowest', start_idx=None):
         """
         Selects a region of the streak based on a percentage of its total size.
@@ -418,7 +611,37 @@ class load_data:
         self.kin_coords[roi_name] = self.kin_coords[roi_name][mask]
         self.kouts[roi_name] = self.kouts[roi_name][mask]
         self.kout_coords[roi_name] = self.kout_coords[roi_name][mask]
+    def order_pixels(self, roi_name):
+        """Reorders the pixels of coherent images and corresponding k-vectors based on their distance from the center.
+    
+        This method reorders the coherent images and updates the corresponding k-vectors
+        based on their distance from the center. The reordering is done to facilitate specific analysis or
+        visualization by aligning the data in a certain order.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) for which the pixels 
+                             and k-vectors will be reordered.
+        """
+        sorted_indices = reorder_pixels_from_center(self.kouts[roi_name], connected_array=np.array(self.coherent_imgs[roi_name]))
         
+        # Debugging: Print types and shapes
+        print(f"sorted_indices dtype: {sorted_indices.dtype}, shape: {sorted_indices.shape}")
+        print(f"kouts shape before indexing: {self.kouts[roi_name].shape}")
+
+        self.kouts[roi_name] = self.kouts[roi_name][sorted_indices]
+        self.kout_coords[roi_name] = self.kout_coords[roi_name][sorted_indices]
+        self.coherent_imgs[roi_name] = self.coherent_imgs[roi_name][sorted_indices]
+
+        try:
+            self.kins[roi_name] = self.kins[roi_name][sorted_indices]
+            self.kin_coords[roi_name] = self.kin_coords[roi_name][sorted_indices]
+        except:
+            print("Did not order kins and kin coords.")
+
+        try:
+            self.images_object[roi_name] = self.images_object[roi_name][sorted_indices]
+        except:
+            print("Did not order detected objects.")   
     ################### preprocessing coherent images ###################
     @time_it
     def make_coherent_images(self, roi_name):
@@ -448,7 +671,7 @@ class load_data:
             coherent_imgs.append(make_coherent_image(self.ptychographs[roi_name], np.array([xp,yp])))
 
         self.coherent_imgs[roi_name] = np.array(coherent_imgs)
-        
+    @log_roi_params  
     def filter_coherent_images(self, roi_name:str, variance_threshold):
         """Filters coherent images based on variance threshold.
 
@@ -474,6 +697,7 @@ class load_data:
         self.coherent_imgs[roi_name] = cleaned_coh_images.copy()
         self.kouts[roi_name] = cleaned_kxky.copy()
         self.kins[roi_name] = cleaned_kins.copy()
+    @log_roi_params
     def remove_coh_background(self, roi_name, sigma):
         """Removes the background noise from coherent images for a given region of interest (ROI).
 
@@ -507,37 +731,9 @@ class load_data:
         """
         
         self.coherent_imgs[roi_name] = make_2dimensions_even(self.coherent_imgs[roi_name], num_jobs=self.num_jobs)
-    def order_pixels(self, roi_name):
-        """Reorders the pixels of coherent images and corresponding k-vectors based on their distance from the center.
     
-        This method reorders the coherent images and updates the corresponding k-vectors
-        based on their distance from the center. The reordering is done to facilitate specific analysis or
-        visualization by aligning the data in a certain order.
     
-        Args:
-            roi_name (str): The name of the region of interest (ROI) for which the pixels 
-                             and k-vectors will be reordered.
-        """
-        sorted_indices = reorder_pixels_from_center(self.kouts[roi_name], connected_array=np.array(self.coherent_imgs[roi_name]))
-        
-        # Debugging: Print types and shapes
-        print(f"sorted_indices dtype: {sorted_indices.dtype}, shape: {sorted_indices.shape}")
-        print(f"kouts shape before indexing: {self.kouts[roi_name].shape}")
-
-        self.kouts[roi_name] = self.kouts[roi_name][sorted_indices]
-        self.kout_coords[roi_name] = self.kout_coords[roi_name][sorted_indices]
-        self.coherent_imgs[roi_name] = self.coherent_imgs[roi_name][sorted_indices]
-
-        try:
-            self.kins[roi_name] = self.kins[roi_name][sorted_indices]
-            self.kin_coords[roi_name] = self.kin_coords[roi_name][sorted_indices]
-        except:
-            print("Did not order kins and kin coords.")
-
-        try:
-            self.images_object[roi_name] = self.images_object[roi_name][sorted_indices]
-        except:
-            print("Did not order detected objects.")
+    @log_roi_params
     def apply_median_filter(self, roi_name, kernel_size, stride, threshold):
         """Applies a median filter to coherent images for a given region of interest (ROI).
 
@@ -565,6 +761,7 @@ class load_data:
                                                               stride = stride, 
                                                               threshold=threshold, 
                                                               n_jobs=self.num_jobs)
+    @log_roi_params
     def apply_bilateral_filter(self, roi_name, sigma_spatial, sigma_range, kernel_size):
         """Applies a bilateral filter to the coherent images for a given region of interest (ROI).
 
@@ -586,6 +783,7 @@ class load_data:
                             filter. A larger kernel size will result in stronger filtering.
     """
         self.coherent_imgs[roi_name] = bilateral_filter_parallel(self.coherent_imgs[roi_name], sigma_spatial, sigma_range, kernel_size, n_jobs=self.num_jobs)
+    @log_roi_params
     def detect_object(self, roi_name, threshold, min_val, max_val):
         """Detects objects within the specified region of interest (ROI) and filters based on intensity.
 
@@ -616,7 +814,7 @@ class load_data:
         
         self.kouts[roi_name] = np.array(self.kouts[roi_name])[mask].copy()
         self.kins[roi_name] = np.array(self.kins[roi_name])[mask].copy()
-        
+    @log_roi_params    
     def blur_detected_objs(self, roi_name, sigma):
         """Applies Gaussian blur to the detected objects in the specified region of interest (ROI).
 
@@ -633,6 +831,7 @@ class load_data:
     
         """
         self.images_object[roi_name] = apply_gaussian_blur(self.images_object[roi_name], sigma=sigma)
+    @log_roi_params
     def mask_cohimgs_threshold(self, roi_name, threshold_value):
         """Applies a threshold mask to the coherent images in the given ROI.
 
@@ -648,6 +847,7 @@ class load_data:
     
         """
         self.coherent_imgs[roi_name] = threshold_data(self.coherent_imgs[roi_name], threshold_value)
+    @log_roi_params
     def mask_region_cohimgs(self, roi_name, region, mode = 'zeros'):
         """Masks a specific region of coherent images within the given ROI.
 
@@ -723,22 +923,62 @@ class load_data:
                 data_test = f['/entry/data/data'][frame_no,:,:]
         else:
             data_test = stack_4d_data_old(self.dir, self.rois_dict['full_det'], self.fast_axis_steps, self.slow_axis)[file_no,frame_no, :,:]
-        
+
+        data_test = mask_hot_pixels(data_test)
         fig, axes = plt.subplots(1, 2, figsize=(10,5))
 
         log_data = np.log1p(data_test)
 
-        axes[0].imshow(data_test, cmap='jet',  vmin = vmin1, vmax = vmax1)
-        axes[0].set_title(f'Full Detector in Frame ({file_no},{frame_no})')
+        intensity = axes[0].imshow(data_test, cmap='jet',  vmin = vmin1, vmax = vmax1)
+        axes[0].set_title(f'Full Detector')
         axes[0].axis('on')  
-
-        axes[1].imshow(log_data, cmap='jet',  vmin=vmin2, vmax=vmax2)
-        axes[1].set_title(f'Log Scale in Frame ({file_no},{frame_no})')
+        plt.colorbar(intensity, ax=axes[0], fraction=0.046, pad=0.04)
+        log_intensity = axes[1].imshow(log_data, cmap='jet',  vmin=vmin2, vmax=vmax2)
+        axes[1].set_title(f'Log Scale')
         axes[1].axis('on')
+        plt.colorbar(log_intensity, ax=axes[1], fraction=0.046, pad=0.04)
+        
+        plt.tight_layout()
+        plt.show()
+    def plot_average_full_detector(self,vmin1=None, vmax1=None, 
+                                        vmin2=None, vmax2=None):
+
+        if self.averaged_data["full_det"] is None:
+            if self.beamtime == 'new':
+    
+                f0_name = self.dir+self.fnames[0]
+                with h5py.File(f0_name,'r') as f:
+                    data_avg = np.mean(f['/entry/data/data'][:,:,:], axis = 0)
+                    
+                for fname in tqdm(self.fnames[1:]):
+                    file_name = self.dir+fname
+            
+                    with h5py.File(file_name,'r') as f:
+                        data_avg += np.mean(f['/entry/data/data'][:,:,:], axis = 0)
+            else:
+                data_avg = np.mean(stack_4d_data_old(self.dir, self.rois_dict['full_det'], 
+                                                     self.fast_axis_steps, self.slow_axis), axis = (0,1))
+    
+            self.averaged_data["full_det"] = data_avg
+            self.averaged_data["full_det"] = mask_hot_pixels(self.averaged_data["full_det"])
+            
+        fig, axes = plt.subplots(1, 2, figsize=(10,5))
+
+        log_data = np.log1p(self.averaged_data["full_det"])
+
+        intensity = axes[0].imshow(self.averaged_data["full_det"], cmap='jet',  vmin = vmin1, vmax = vmax1)
+        axes[0].set_title(f'Full Detector - Average')
+        axes[0].axis('on')  
+        plt.colorbar(intensity, ax=axes[0], fraction=0.046, pad=0.04)
+        log_intensity = axes[1].imshow(log_data, cmap='jet',  vmin=vmin2, vmax=vmax2)
+        axes[1].set_title(f'Log Scale')
+        axes[1].axis('on')
+        plt.colorbar(log_intensity, ax=axes[1], fraction=0.046, pad=0.04)
 
         plt.tight_layout()
         plt.show()
-    def plot_4d_dataset(self, roi_name: str):
+    
+    def plot_4d_dataset(self, roi_name: str, vmin1 = None, vmax1 = None,vmin2 = None, vmax2 = None):
         """Plots the 4D dataset for a specified region of interest (ROI).
     
         This method generates an interactive plot showing both coherent and detector images 
@@ -786,11 +1026,11 @@ class load_data:
         coherent_image = make_coherent_image(self.ptychographs[roi_name], np.array([prow_slider.value, pcol_slider.value]))
         detector_image = make_detector_image(self.ptychographs[roi_name], np.array([lrow_slider.value, lcol_slider.value]))
 
-        vmin_c = np.mean(coherent_image) - 0.05 * np.mean(coherent_image)
-        vmax_c = np.mean(coherent_image) + 0.05 * np.mean(coherent_image)
-        vmin_d = np.mean(detector_image) - 0.3 * np.mean(detector_image)
-        vmax_d = np.mean(detector_image) + 2 * np.mean(detector_image)
-
+        vmin_c = vmin1 #np.mean(coherent_image) - 0.05 * np.mean(coherent_image)
+        vmax_c = vmax1 #np.mean(coherent_image) + 0.05 * np.mean(coherent_image)
+        vmin_d = vmin2 #np.mean(detector_image) - 0.3 * np.mean(detector_image)
+        vmax_d = vmax2 #np.mean(detector_image) + 2 * np.mean(detector_image)
+        
         im0 = axes[0].imshow(coherent_image, cmap='plasma', vmin=vmin_c, vmax=vmax_c)
         
         axes[0].set_title(f"Coherent Image (lx={lrow_slider.value}, ly={lcol_slider.value})")
@@ -911,7 +1151,8 @@ class load_data:
                                    including the ROI name will be used.
     
         """
-        avg = np.mean(np.array(self.coherent_imgs[roi_name]), axis = 0)
+        avg = self.averaged_coherent_images[roi_name]
+        #avg = np.mean(np.array(self.coherent_imgs[roi_name]), axis = 0)
 
         if title is None:
             title = f"Average Coherent Images {roi_name}"
@@ -1038,7 +1279,10 @@ class load_data:
             A plot of the averaged frames for the specified ROI, with the given color scale.
         """
         
-        plot_roi_from_numpy(self.averaged_data[roi_name], [0,-1,0,-1], f"Averaged Frames for {roi_name}", vmin=vmin, vmax=vmax )
+        plot_roi_from_numpy(self.averaged_data[roi_name], [0,-1,0,-1], 
+                            f"Averaged Frames for {roi_name}", 
+                            vmin=vmin, vmax=vmax )
+        
     def plot_detector_roi(self, roi_name, file_no, frame_no, title=None, vmin=None, vmax=None,mask_hot = False, save=False):
         """Plots a region of interest (ROI) on the detector for a given frame.
 
@@ -1111,7 +1355,117 @@ class load_data:
         """
         plot_map_on_detector(self.averaged_data[roi_name], self.kout_coords[roi_name], 
                              vmin, vmax, title, cmap, crop=False,roi= self.rois_dict[roi_name])
+    
+    ################## Save and Load #####################
+    def save_roi_data(self, roi_name, file_path):
+    
+        """
+        Save the processed data and metadata to an HDF5 file.
+    
+        Args:
+            roi_name (str): The ROI name for which the data should be saved.
 
+            file_path (str): The path where the HDF5 file will be saved.
+        """
+
+        with h5py.File(file_path, "w") as h5f:
+            # Save metadata as attributes in the root group
+            exp_params = h5f.create_group("experimental_params")
+
+            process_params = h5f.create_group("prcoessing_params")
+            
+            for key, value in self.exp_params.items():
+                exp_params.attrs[key] = value  # Store each parameter as an attribute
+
+            for key, value in self.lens_params.items():
+                exp_params.attrs[key] = json.dumps(value)
+                
+            for func in self.log_roi_params[roi_name]:
+                # self.log_roi_params[roi_name] is a list, each element correponds to a function 
+                # func is then a dictionary
+                # func["functions"] will be the function name
+                func_name = func['function']
+                func.pop('function')
+                process_params.attrs[func['function']] = json.dumps(func)
+
+
+            images = h5f.create_group("processed_images")
+
+            images.create_dataset("coherent_images", data=self.coherent_imgs[roi_name], compression="gzip")
+            try:
+                images.create_dataset("average_coherent_images", data=self.averaged_coherent_images[roi_name], compression="gzip")
+                images.create_dataset("averaged_detector_roi", data=self.averaged_data[roi_name])
+            except:
+                self.average_frames_roi(roi_name)
+                images.create_dataset("average_coherent_images", data=self.averaged_coherent_images[roi_name], compression="gzip")
+                images.create_dataset("averaged_detector_roi", data=self.averaged_data[roi_name])
+                
+            images.create_dataset("averaged_coherent_images", 
+                                  data=np.mean(self.coherent_imgs, axis=0),compression="gzip")
+            try:
+                images.create_dataset("averaged_full_detector", data=self.averaged_data['full_det'])
+            kvectors = h5f.create_group("kvectors")
+            kvectors.create_dataset("kins", data=self.kins[roi_name], compression="gzip")
+            kvectors.create_dataset("kouts", data = self.kouts[roi_name], compression='gzip')
+            kvectors.create_dataset("kin_coords", data=self.kin_coords[roi_name], compression="gzip")
+            kvectors.create_dataset("kout_coords", data = self.kout_coords[roi_name], compression='gzip')
+
+            try:
+                kvectors.create_dataset("pupil_kins", data = self.kins["pupil"], compression="gzip")
+            except:
+                print("Pupil kins were not saved")
+
+
+    def load_roi_data(self, roi_name, file_path):
+        """
+        Load processed data and metadata for a specific ROI from an HDF5 file.
+    
+        Args:
+            roi_name (str): The ROI name for which the data should be loaded.
+            file_path (str): Path to the HDF5 file containing saved data.
+        """
+        with h5py.File(file_path, "r") as h5f:
+            # Load Experimental Parameters
+            exp_params = h5f["experimental_params"]
+            
+            self.exp_params = {}
+            for key, val in exp_params.attrs.items():
+                # Try to decode JSON, fallback to raw value
+                try:
+                    decoded = json.loads(val)
+                    self.exp_params[key] = decoded
+                except (TypeError, json.JSONDecodeError):
+                    self.exp_params[key] = val
+                finally:
+                    print(f"Something wrong with this key: {key}")
+    
+            # Split lens_params if stored within exp_params
+            self.lens_params = {}
+            for key, val in self.exp_params.items():
+                if isinstance(val, dict) and all(k in val for k in ("focal_length", "height", "lens_na")):
+                    self.lens_params[key] = val
+    
+            # Load Processed Images 
+            images = h5f["processed_images"]
+            if not hasattr(self, 'coherent_imgs'):
+                self.coherent_imgs = {}
+            self.coherent_imgs[roi_name] = images["coherent_images"][...]
+            self.averaged_coherent_images[roi_name] = images["average_coherent_images"][...]
+            self.averaged_data[roi_name] = images["averaged_detector_roi"][...]
+            # Load K-Vectors 
+            kvectors = h5f["kvectors"]
+            for attr in ["kins", "kouts", "kin_coords", "kout_coords"]:
+                if not hasattr(self, attr):
+                    setattr(self, attr, {})
+                getattr(self, attr)[roi_name] = kvectors[attr][...]
+    
+            # try loading pupil_kins
+            if "pupil_kins" in kvectors:
+                if not hasattr(self, "kins"):
+                    self.kins = {}
+                self.kins["pupil"] = kvectors["pupil_kins"][...]
+
+    
         
     ################### Prepares the data ###################
     def prepare_roi(self, roi_name:str, 
@@ -1143,7 +1497,7 @@ class load_data:
         print(self.centre_pixel)
         self.make_4d_dataset(roi_name=roi_name, mask_max_coh = mask_max_coh, mask_min_coh=mask_min_coh)
         if normalisation_roi is not None:
-            self.normalise_detector(normalisation_roi, roi_name)
+            self.normalise_detector(roi_name, normalisation_roi)
             
         if pool_det is not None:
             self.pool_detector_space(roi_name, *pool_det)

@@ -200,10 +200,10 @@ def stack_4d_data_old(file_path,roi, fast_axis_steps, slow_axis = 0):
         data = data.reshape(slow_axis_steps,fast_axis_steps,dims[1],dims[2])
     
     if slow_axis == 0: 
+        data = np.transpose(data, (1,0,2,3))
 
-        stacked_data = np.transpose(data, (1,0,2,3))
-    
-    return stacked_data
+    print(f"The shape of the data is {data.shape}")
+    return data
 
 
 ################# Process Data #################
@@ -321,7 +321,7 @@ def mask_hot_pixels(array, mask_max_coh=False, mask_min_coh= False):
     
     return masked_array
 
-def estimate_pupil_size(array, mask_val, pixel_size, pupil_roi, crop=True):
+def estimate_pupil_size(array, mask_val, pixel_size, pupil_roi=None, crop=True):
     """
     Computes the average length of a box with jagged edges in x and y directions.
 
@@ -334,7 +334,7 @@ def estimate_pupil_size(array, mask_val, pixel_size, pupil_roi, crop=True):
     Returns:
         tuple: (average_x_length, average_y_length)
     """
-    if crop: 
+    if pupil_roi is not None: 
         array = array[pupil_roi[0]:pupil_roi[1], pupil_roi[2]:pupil_roi[3]]
 
     min_lx = array.shape[0] /2

@@ -183,8 +183,9 @@ def compute_vectors(coordinates, detector_distance, pixel_size, central_pixel, w
         vectors.append(vector)
 
     pixel_vectors = np.array(vectors)
+    print(pixel_vectors.shape)
     unit_vectors = pixel_vectors/np.linalg.norm(pixel_vectors, axis = 1)[:,np.newaxis]
-
+    
     k = 2.0*np.pi /wavelength
 
     unit_vectors = np.array(unit_vectors)
