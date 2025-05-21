@@ -1373,7 +1373,9 @@ class load_data:
             exp_params = h5f.create_group("experimental_params")
 
             process_params = h5f.create_group("prcoessing_params")
-            
+
+            process_params.attrs[roi_name] = roi_name
+            process_params.attrs[roi] = json.dumps(self.rois_dict[roi_name])
             for key, value in self.exp_params.items():
                 exp_params.attrs[key] = value  # Store each parameter as an attribute
 
@@ -1390,20 +1392,22 @@ class load_data:
 
 
             images = h5f.create_group("processed_images")
-
             images.create_dataset("coherent_images", data=self.coherent_imgs[roi_name], compression="gzip")
             try:
-                images.create_dataset("average_coherent_images", data=self.averaged_coherent_images[roi_name], compression="gzip")
-                images.create_dataset("averaged_detector_roi", data=self.averaged_data[roi_name])
+                images.create_dataset("average_coherent_images", 
+                                      data=self.averaged_coherent_images[roi_name], compression="gzip")
+                images.create_dataset("averaged_detector_roi", 
+                                      data=self.averaged_data[roi_name], compression="gzip")
             except:
                 self.average_frames_roi(roi_name)
-                images.create_dataset("average_coherent_images", data=self.averaged_coherent_images[roi_name], compression="gzip")
-                images.create_dataset("averaged_detector_roi", data=self.averaged_data[roi_name])
-                
-            images.create_dataset("averaged_coherent_images", 
-                                  data=np.mean(self.coherent_imgs, axis=0),compression="gzip")
+                images.create_dataset("average_coherent_images", 
+                                      data=self.averaged_coherent_images[roi_name], compression="gzip")
+                images.create_dataset("averaged_detector_roi", 
+                                      data=self.averaged_data[roi_name], compression="gzip")
+        
             try:
-                images.create_dataset("averaged_full_detector", data=self.averaged_data['full_det'])
+                images.create_dataset("averaged_full_detector", 
+                                      data=self.averaged_data['full_det'], compression="gzip")
             except:
                 print("No averaged full detector to save")
                 
@@ -1417,8 +1421,9 @@ class load_data:
                 kvectors.create_dataset("pupil_kins", data = self.kins["pupil"], compression="gzip")
             except:
                 print("Pupil kins were not saved")
-
-
+                
+            print(f"Data saved at {file_path}")
+            
     def load_roi_data(self, roi_name, file_path):
         """
         Load processed data and metadata for a specific ROI from an HDF5 file.
@@ -1468,7 +1473,41 @@ class load_data:
                     self.kins = {}
                 self.kins["pupil"] = kvectors["pupil_kins"][...]
 
+    def save_roi_ptychograph(self, roi_name, file_path):
     
+        """
+        Save the processed data and metadata to an HDF5 file.
+    
+        Args:
+            roi_name (str): The ROI name for which the data should be saved.
+
+            file_path (str): The path where the HDF5 file will be saved.
+        """
+
+        with h5py.File(file_path, "w") as h5f:
+            data = h5f.create_group("data")
+            # Save metadata as attributes in the root group
+            data.create_dataset("data", data = self.ptychographs[roi_name], compression="gzip")
+
+        print(f"Data saved at {file_path}")
+    def load_roi_ptychograph(self, roi_name, file_path):
+    
+        """
+        Save the processed data and metadata to an HDF5 file.
+    
+        Args:
+            roi_name (str): The ROI name for which the data should be saved.
+
+            file_path (str): The path where the HDF5 file will be saved.
+        """
+        print("Loading data ...")
+        with h5py.File(file_path, "r") as h5f:
+            data = h5f["data"]
+            # Save metadata as attributes in the root group
+            self.ptychographs[roi_name] = data["data"]
+
+        print("Data loaded")
+
         
     ################### Prepares the data ###################
     def prepare_roi(self, roi_name:str, 
