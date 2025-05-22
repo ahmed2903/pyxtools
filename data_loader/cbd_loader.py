@@ -7,8 +7,6 @@
 import numpy as np 
 import h5py
 import matplotlib.pyplot as plt
-import os
-import time
 import copy
 from tqdm.notebook import tqdm
 from functools import wraps
@@ -16,9 +14,7 @@ import json
 
 from matplotlib.patches import Rectangle
 
-    
 from IPython.display import display
-import concurrent
 
 from .data_fs import *
 from .kvectors import make_coordinates, compute_vectors, optimise_kin, reverse_kins_to_pixels, rotation_matrix, calc_qvec, extract_parallel_line, extract_streak_region
@@ -64,19 +60,13 @@ class load_data:
                  num_jobs = 32):
         
         
-        self.det_psize = det_psize
-        self.det_distance = det_distance
-        self.centre_pixel = centre_pixel
-        self.wavelength = wavelength 
-        self.slow_axis = slow_axis
         self.beamtime = beamtime
-        self.fast_axis_steps = fast_axis_steps
 
         self.exp_params = {
             'scan_num' : scan_num,
             'det_psize': det_psize,
             'det_distance' : det_distance,
-            'centre_pixe' : centre_pixel,
+            'centre_pixel' : centre_pixel,
             'wavelength' : wavelength, 
             'slow_axis' : slow_axis, 
             'fast_axis_steps' : fast_axis_steps
@@ -92,7 +82,7 @@ class load_data:
         self.scan_num = scan_num
         self.rois_dict = {}
         self.ptychographs = {} # 4D Data set (x, y, fx, fy)
-        self.averaged_data = {} # Average of all detector frames 
+        self.averaged_det_data = {} # Average of all detector frames 
         self.averaged_coherent_images = {}
         self.images_object = {} # Detected Objects
         self.kout_coords = {} # Coords
@@ -118,7 +108,7 @@ class load_data:
         
         self._checkpoint_stack = []
         
-        self.averaged_data["full_det"] = None
+        self.averaged_det_data["full_det"] = None
         self.rois_dict["full_det"] = [0,-1,0,-1]
         
     ################### Checkpointing ##################
@@ -174,7 +164,7 @@ class load_data:
     def log_params(func):
         """Decorator that logs function name and input parameters."""
         @wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(self,*args, **kwargs):
             log_entry = {
                 'function': func.__name__,
                 'args': args,
@@ -236,18 +226,18 @@ class load_data:
         """
         
         if self.beamtime == 'old':
-            if self.fast_axis_steps is None:
+            if self.exp_params['fast_axis_steps'] is None:
                 raise ValueError("fast_axis_steps is required")
             self.ptychographs[roi_name] = stack_4d_data_old(self.dir, 
                                                             self.rois_dict[roi_name], 
-                                                            self.fast_axis_steps, 
-                                                            self.slow_axis)
+                                                            self.exp_params['fast_axis_steps'], 
+                                                            self.exp_params['slow_axis'])
             
         else:
             self.ptychographs[roi_name] = stack_4d_data(self.dir, 
                                                         self.fnames, 
                                                         self.rois_dict[roi_name], 
-                                                        slow_axis = self.slow_axis, 
+                                                        slow_axis = self.exp_params['slow_axis'], 
                                                         conc=True, 
                                                         num_jobs=self.num_jobs)
         
@@ -267,9 +257,9 @@ class load_data:
             self.pupil_size: The estimated pupil size, computed using the averaged pupil data
             and the given mask threshold.
         """
-        self.pupil_size = estimate_pupil_size(self.averaged_data["pupil"], 
+        self.pupil_size = estimate_pupil_size(self.averaged_det_data["pupil"], 
                            mask_val=mask_val,
-                           pixel_size=self.det_psize)
+                           pixel_size=self.exp_params['det_psize'])
 
     def add_lens(self, lens_name:str, focal_length:float, height:float):
         """
@@ -303,7 +293,7 @@ class load_data:
         and averages them to determine a representative detector distance.
     
         Updates:
-            self.det_distance: Estimated detector distance in microns based on optical geometry.
+            self.exp_params['det_distance']: Estimated detector distance in microns based on optical geometry.
         """
         largest_na = 0
         smallest_na = 1e4
@@ -314,14 +304,13 @@ class load_data:
             largest_na = max(largest_na, na)
             smallest_na = min(smallest_na, na)    
         
-        distance1 = compute_detector_distance_from_NA(largest_na, max(self.pupil_size))
-        distance2 = compute_detector_distance_from_NA(smallest_na, min(self.pupil_size))
+        distance1 = estimate_detector_distance_from_NA(largest_na, max(self.pupil_size))
+        distance2 = estimate_detector_distance_from_NA(smallest_na, min(self.pupil_size))
 
         print(f"First detector distance is {distance1} microns")
         print(f"Second detector distance is {distance2} mircons")
         
-        self.det_distance = (distance1+distance2)/2
-        self.exp_params['det_distance'] = self.det_distance
+        self.exp_params['det_distance'] = (distance1+distance2)/2
     
     ################### prepare detector roi ###################
     @log_roi_params
@@ -352,10 +341,10 @@ class load_data:
                              The ROI should be present in the `self.ptychographs` dictionary.
     
         Updates:
-            The `self.averaged_data` dictionary with the averaged data for the specified ROI 
+            The `self.averaged_det_data` dictionary with the averaged data for the specified ROI 
             after applying the hot pixel mask.
         """
-        self.averaged_data[roi_name] = np.mean(self.ptychographs[roi_name], axis=(0,1))
+        self.averaged_det_data[roi_name] = np.mean(self.ptychographs[roi_name], axis=(0,1))
         self.averaged_coherent_images[roi_name] =  np.mean(self.ptychographs[roi_name], axis=(2,3))
         
     def mask_hotpixels_roi(self, roi_name, hot_pixels = True, mask_val=1):
@@ -408,9 +397,9 @@ class load_data:
                                                        stride=stride, padding=padding)
         
         if stride is None:
-            self.det_psize *= kernel_size
+            self.exp_params['det_psize'] *= kernel_size
         else:
-            self.det_psize *= stride
+            self.exp_params['det_psize'] *= stride
         print("Done.")
     @log_roi_params    
     def normalise_detector(self, roi_name, reference_roi):
@@ -431,11 +420,11 @@ class load_data:
     
         """
         try:
-            peak_intensity = np.sum(self.ptychographs[roi_name_ref], axis=(-2,-1))
+            peak_intensity = np.sum(self.ptychographs[reference_roi], axis=(-2,-1))
         except: 
             self.ptychographs[reference_roi] = stack_4d_data(self.dir, self.fnames, self.rois_dict[reference_roi], conc=True, num_jobs = self.num_jobs)
             self.ptychographs[reference_roi] = mask_hot_pixels(self.ptychographs[reference_roi])
-            peak_intensity = np.sum(self.ptychographs[roi_name_ref], axis=(-2,-1))
+            peak_intensity = np.sum(self.ptychographs[reference_roi], axis=(-2,-1))
         
         avg_intensity = np.mean(peak_intensity)
         self.ptychographs[roi_name] = self.ptychographs[roi_name]/peak_intensity[...,np.newaxis, np.newaxis] * avg_intensity
@@ -487,10 +476,10 @@ class load_data:
                               computation.
     
         """
-        self.kout_coords[roi_name] = make_coordinates(self.averaged_data[roi_name], mask_val, self.rois_dict[roi_name], crop=False)
+        self.kout_coords[roi_name] = make_coordinates(self.averaged_det_data[roi_name], mask_val, self.rois_dict[roi_name], crop=False)
 
-        self.kouts[roi_name] = compute_vectors(self.kout_coords[roi_name], self.det_distance, 
-                                               self.det_psize, self.centre_pixel, self.wavelength)
+        self.kouts[roi_name] = compute_vectors(self.kout_coords[roi_name], self.exp_params['det_distance'], 
+                                               self.exp_params['det_psize'], self.exp_params['centre_pixel'], self.exp_params['wavelength'])
     @log_roi_params
     def compute_kins(self, roi_name, est_ttheta, method = "BFGS", gtol = 1e-6):
         """
@@ -536,11 +525,11 @@ class load_data:
         angle = np.rad2deg(angle)
         
         print(f"the initial 2theta angle is: {angle}")
-        self.g_init[roi_name] = calc_qvec(self.kouts[roi_name], self.kins_avg, ttheta = est_ttheta, wavelength= self.wavelength)
+        self.g_init[roi_name] = calc_qvec(self.kouts[roi_name], self.kins_avg, ttheta = est_ttheta, wavelength= self.exp_params['wavelength'])
 
-        self.kins[roi_name], self.optimal_angles[roi_name] = optimise_kin(self.g_init[roi_name], est_ttheta, self.kouts[roi_name], self.wavelength, method, gtol)
+        self.kins[roi_name], self.optimal_angles[roi_name] = optimise_kin(self.g_init[roi_name], est_ttheta, self.kouts[roi_name], self.exp_params['wavelength'], method, gtol)
         
-        self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], self.det_psize, self.det_distance, self.centre_pixel)
+        self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], self.exp_params['det_psize'], self.exp_params['det_distance'], self.exp_params['centre_pixel'])
     @log_roi_params
     def refine_kins(self, roi_name, shifts):
         """
@@ -561,9 +550,9 @@ class load_data:
             g_update =  R @ self.g_init[roi_name][0]
         kin_opt = (self.kouts[roi_name]-g_update)
         kin_opt /= np.linalg.norm(kin_opt, axis = 1)[:,np.newaxis]
-        kin_opt *= 2*np.pi/self.wavelength
+        kin_opt *= 2*np.pi/self.exp_params['wavelength']
         self.kins[roi_name] = kin_opt
-        self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], self.det_psize, self.det_distance, self.centre_pixel)
+        self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], self.exp_params['det_psize'], self.exp_params['det_distance'], self.exp_params['centre_pixel'])
     @log_roi_params
     def select_single_pixel_streak(self, roi_name, width=1, position='center', offset=0):
 
@@ -922,7 +911,7 @@ class load_data:
             with h5py.File(file_name,'r') as f:
                 data_test = f['/entry/data/data'][frame_no,:,:]
         else:
-            data_test = stack_4d_data_old(self.dir, self.rois_dict['full_det'], self.fast_axis_steps, self.slow_axis)[file_no,frame_no, :,:]
+            data_test = stack_4d_data_old(self.dir, self.rois_dict['full_det'], self.exp_params['fast_axis_steps'], self.exp_params['slow_axis'])[file_no,frame_no, :,:]
 
         data_test = mask_hot_pixels(data_test)
         fig, axes = plt.subplots(1, 2, figsize=(10,5))
@@ -943,7 +932,7 @@ class load_data:
     def plot_average_full_detector(self,vmin1=None, vmax1=None, 
                                         vmin2=None, vmax2=None):
 
-        if self.averaged_data["full_det"] is None:
+        if self.averaged_det_data["full_det"] is None:
             if self.beamtime == 'new':
     
                 f0_name = self.dir+self.fnames[0]
@@ -957,16 +946,16 @@ class load_data:
                         data_avg += np.mean(f['/entry/data/data'][:,:,:], axis = 0)
             else:
                 data_avg = np.mean(stack_4d_data_old(self.dir, self.rois_dict['full_det'], 
-                                                     self.fast_axis_steps, self.slow_axis), axis = (0,1))
+                                                     self.exp_params['fast_axis_steps'], self.exp_params['slow_axis']), axis = (0,1))
     
-            self.averaged_data["full_det"] = data_avg
-            self.averaged_data["full_det"] = mask_hot_pixels(self.averaged_data["full_det"])
+            self.averaged_det_data["full_det"] = data_avg
+            self.averaged_det_data["full_det"] = mask_hot_pixels(self.averaged_det_data["full_det"])
             
         fig, axes = plt.subplots(1, 2, figsize=(10,5))
 
-        log_data = np.log1p(self.averaged_data["full_det"])
+        log_data = np.log1p(self.averaged_det_data["full_det"])
 
-        intensity = axes[0].imshow(self.averaged_data["full_det"], cmap='jet',  vmin = vmin1, vmax = vmax1)
+        intensity = axes[0].imshow(self.averaged_det_data["full_det"], cmap='jet',  vmin = vmin1, vmax = vmax1)
         axes[0].set_title(f'Full Detector - Average')
         axes[0].axis('on')  
         plt.colorbar(intensity, ax=axes[0], fraction=0.046, pad=0.04)
@@ -1261,13 +1250,13 @@ class load_data:
         """Plots the averaged frames for the specified region of interest (ROI).
 
         This method displays the averaged data for a given ROI by plotting the mean of 
-        the frames stored in `self.averaged_data`. The plot is displayed using the 
+        the frames stored in `self.averaged_det_data`. The plot is displayed using the 
         `plot_roi_from_numpy` function.
     
         Args:
             roi_name (str): The name of the region of interest (ROI) whose averaged data 
                              is to be plotted. The averaged data should be stored in 
-                             `self.averaged_data`.
+                             `self.averaged_det_data`.
             vmin (float, optional): The minimum value for the color scale. If None, 
                                      the minimum of the data is used. Default is None.
             vmax (float, optional): The maximum value for the color scale. If None, 
@@ -1279,7 +1268,7 @@ class load_data:
             A plot of the averaged frames for the specified ROI, with the given color scale.
         """
         
-        plot_roi_from_numpy(self.averaged_data[roi_name], [0,-1,0,-1], 
+        plot_roi_from_numpy(self.averaged_det_data[roi_name], [0,-1,0,-1], 
                             f"Averaged Frames for {roi_name}", 
                             vmin=vmin, vmax=vmax )
         
@@ -1314,7 +1303,7 @@ class load_data:
             with h5py.File(file_name,'r') as f:
                 data_test = f['/entry/data/data'][frame_no,:,:]
         else:
-            data_test = stack_4d_data_old(self.dir, self.rois_dict[roi_name], self.fast_axis_steps, self.slow_axis)[file_no,frame_no, :,:]
+            data_test = stack_4d_data_old(self.dir, self.rois_dict[roi_name], self.exp_params['fast_axis_steps'], self.exp_params['slow_axis'])[file_no,frame_no, :,:]
 
         if mask_hot:
 
@@ -1336,7 +1325,7 @@ class load_data:
             title (str, optional): Title of the plot. Default is "Mapped kins onto pupil".
             cmap (str, optional): Colormap to use for visualization. Default is "viridis".
         """
-        plot_map_on_detector(self.averaged_data["pupil"], self.kin_coords[roi_name], 
+        plot_map_on_detector(self.averaged_det_data["pupil"], self.kin_coords[roi_name], 
                              vmin, vmax, title, cmap, crop=False,roi= self.rois_dict["pupil"])
 
     def plot_kouts(self, roi_name, vmin=None, vmax = None, title="Mapped kouts", cmap = "viridis"):
@@ -1353,7 +1342,7 @@ class load_data:
             title (str, optional): Title of the plot. Default is "Mapped kouts".
             cmap (str, optional): Colormap to use for visualization. Default is "viridis".
         """
-        plot_map_on_detector(self.averaged_data[roi_name], self.kout_coords[roi_name], 
+        plot_map_on_detector(self.averaged_det_data[roi_name], self.kout_coords[roi_name], 
                              vmin, vmax, title, cmap, crop=False,roi= self.rois_dict[roi_name])
     
     ################## Save and Load #####################
@@ -1376,7 +1365,7 @@ class load_data:
             process_params = h5f.create_group("prcoessing_params")
 
             process_params.attrs[roi_name] = roi_name
-            process_params.attrs[roi] = json.dumps(self.rois_dict[roi_name])
+            process_params.attrs['roi'] = json.dumps(self.rois_dict[roi_name])
             for key, value in self.exp_params.items():
                 exp_params.attrs[key] = value  # Store each parameter as an attribute
 
@@ -1398,17 +1387,17 @@ class load_data:
                 images.create_dataset("average_coherent_images", 
                                       data=self.averaged_coherent_images[roi_name], compression="gzip")
                 images.create_dataset("averaged_detector_roi", 
-                                      data=self.averaged_data[roi_name], compression="gzip")
+                                      data=self.averaged_det_data[roi_name], compression="gzip")
             except:
                 self.average_frames_roi(roi_name)
                 images.create_dataset("average_coherent_images", 
                                       data=self.averaged_coherent_images[roi_name], compression="gzip")
                 images.create_dataset("averaged_detector_roi", 
-                                      data=self.averaged_data[roi_name], compression="gzip")
+                                      data=self.averaged_det_data[roi_name], compression="gzip")
         
             try:
                 images.create_dataset("averaged_full_detector", 
-                                      data=self.averaged_data['full_det'], compression="gzip")
+                                      data=self.averaged_det_data['full_det'], compression="gzip")
             except:
                 print("No averaged full detector to save")
                 
@@ -1460,7 +1449,7 @@ class load_data:
                 self.coherent_imgs = {}
             self.coherent_imgs[roi_name] = images["coherent_images"][...]
             self.averaged_coherent_images[roi_name] = images["average_coherent_images"][...]
-            self.averaged_data[roi_name] = images["averaged_detector_roi"][...]
+            self.averaged_det_data[roi_name] = images["averaged_detector_roi"][...]
             # Load K-Vectors 
             kvectors = h5f["kvectors"]
             for attr in ["kins", "kouts", "kin_coords", "kout_coords"]:
