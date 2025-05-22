@@ -7,8 +7,6 @@
 import numpy as np 
 import h5py
 import matplotlib.pyplot as plt
-import os
-import time
 import copy
 from tqdm.notebook import tqdm
 from functools import wraps
@@ -16,9 +14,7 @@ import json
 
 from matplotlib.patches import Rectangle
 
-    
 from IPython.display import display
-import concurrent
 
 from .data_fs import *
 from .kvectors import make_coordinates, compute_vectors, optimise_kin, reverse_kins_to_pixels, rotation_matrix, calc_qvec, extract_parallel_line, extract_streak_region
