@@ -1357,6 +1357,7 @@ class load_data:
                              vmin, vmax, title, cmap, crop=False,roi= self.rois_dict[roi_name])
     
     ################## Save and Load #####################
+    @time_it
     def save_roi_data(self, roi_name, file_path):
     
         """
@@ -1392,7 +1393,7 @@ class load_data:
 
 
             images = h5f.create_group("processed_images")
-            images.create_dataset("coherent_images", data=self.coherent_imgs[roi_name], compression="gzip")
+            images.create_dataset("coherent_images", data=self.coherent_imgs[roi_name], compression="gzip",chunks=True)
             try:
                 images.create_dataset("average_coherent_images", 
                                       data=self.averaged_coherent_images[roi_name], compression="gzip")
@@ -1423,7 +1424,7 @@ class load_data:
                 print("Pupil kins were not saved")
                 
             print(f"Data saved at {file_path}")
-            
+    @time_it     
     def load_roi_data(self, roi_name, file_path):
         """
         Load processed data and metadata for a specific ROI from an HDF5 file.
@@ -1472,7 +1473,7 @@ class load_data:
                 if not hasattr(self, "kins"):
                     self.kins = {}
                 self.kins["pupil"] = kvectors["pupil_kins"][...]
-
+    @time_it
     def save_roi_ptychograph(self, roi_name, file_path):
     
         """
@@ -1487,9 +1488,10 @@ class load_data:
         with h5py.File(file_path, "w") as h5f:
             data = h5f.create_group("data")
             # Save metadata as attributes in the root group
-            data.create_dataset("data", data = self.ptychographs[roi_name], compression="gzip")
+            data.create_dataset("data", data = self.ptychographs[roi_name], compression="gzip",chunks=True)
 
         print(f"Data saved at {file_path}")
+    @time_it
     def load_roi_ptychograph(self, roi_name, file_path):
     
         """
@@ -1504,7 +1506,7 @@ class load_data:
         with h5py.File(file_path, "r") as h5f:
             data = h5f["data"]
             # Save metadata as attributes in the root group
-            self.ptychographs[roi_name] = data["data"]
+            self.ptychographs[roi_name] = np.array(data["data"])
 
         print("Data loaded")
 
@@ -1536,7 +1538,6 @@ class load_data:
             normalisation_roi (str, optional): The name of an ROI for normalization, if specified. Defaults to None.
         
         """
-        print(self.centre_pixel)
         self.make_4d_dataset(roi_name=roi_name, mask_max_coh = mask_max_coh, mask_min_coh=mask_min_coh)
         if normalisation_roi is not None:
             self.normalise_detector(roi_name, normalisation_roi)
