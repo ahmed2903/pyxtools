@@ -91,9 +91,10 @@ class load_data:
         self.kin_coords = {} # Coords
         self.coherent_imgs = {} 
         self.optimal_angles = {} # Euler angles that rotate Kout to Kin
+        self.est_ttheta = {}
         self.g_init = {} # Initial G vector for a Signal
         self.det_average = None
-
+        
         self.lens_params = {}
         
         self.log_roi_params = {} # Logs the processing parameters for each method called per roi
@@ -171,7 +172,7 @@ class load_data:
                 'kwargs': kwargs
             }
             self.log_params.append(log_entry)
-            return func(*args, **kwargs)
+            return func(self,*args, **kwargs)
         return wrapper
 
     def log_roi_params(func):
@@ -209,6 +210,22 @@ class load_data:
         return wrapper
         
     ################### Loading data ###################
+    @log_roi_params
+    def add_roi(self, roi_name:str , roi:list):
+        """Adds a region of interest (ROI) to the dictionary.
+
+        This method stores an ROI with its name and coordinates in the `rois_dict` dictionary.
+        The coordinates are given as a list [xstart, xend, ystart, yend].
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI).
+            roi (list): A list containing the coordinates of the ROI in the format [xstart, xend, ystart, yend].
+    
+        Updates:
+            self.rois_dict (dict): The dictionary storing the ROIs with their names as keys and coordinates as values.
+        """
+        self.rois_dict[roi_name] = roi 
+    
     def make_4d_dataset(self, roi_name: str, mask_max_coh=False, mask_min_coh= False):
         
         """Creates a 4D dataset from a region of interest (ROI) on the detector.
@@ -298,7 +315,7 @@ class load_data:
         largest_na = 0
         smallest_na = 1e4
         
-        for key, val in self.lens_params:
+        for key, val in self.lens_params.items():
 
             na = val['lens_na']
             largest_na = max(largest_na, na)
@@ -313,21 +330,7 @@ class load_data:
         self.exp_params['det_distance'] = (distance1+distance2)/2
     
     ################### prepare detector roi ###################
-    @log_roi_params
-    def add_roi(self, roi_name:str , roi:list):
-        """Adds a region of interest (ROI) to the dictionary.
-
-        This method stores an ROI with its name and coordinates in the `rois_dict` dictionary.
-        The coordinates are given as a list [xstart, xend, ystart, yend].
     
-        Args:
-            roi_name (str): The name of the region of interest (ROI).
-            roi (list): A list containing the coordinates of the ROI in the format [xstart, xend, ystart, yend].
-    
-        Updates:
-            self.rois_dict (dict): The dictionary storing the ROIs with their names as keys and coordinates as values.
-        """
-        self.rois_dict[roi_name] = roi 
         
     def average_frames_roi(self, roi_name):
         """Averages the frames of the dataset for a given region of interest (ROI).
@@ -480,6 +483,33 @@ class load_data:
 
         self.kouts[roi_name] = compute_vectors(self.kout_coords[roi_name], self.exp_params['det_distance'], 
                                                self.exp_params['det_psize'], self.exp_params['centre_pixel'], self.exp_params['wavelength'])
+    
+    def estimate_ttheta(self, roi_name):
+        """Estiamtes the two theta value for the signal in the roi, assuming there is one incident wavevector which is specified by the average of all k_in vectors in the pupil. 
+        Args:
+            roi_name (str): The name of the region of interest (ROI) for which the two_theta value is to be estimated.
+
+        Updates:
+            self.est_ttheta[roi_name]: Estimated 2 theta angle for that signal
+        
+        """
+        try:
+            self.kins_avg = np.mean(self.kouts["pupil"], axis = 0, keepdims = True )
+        except:
+            raise ValueError("Must compute pupil kouts first")
+
+        kouts_avg = np.mean(self.kouts[roi_name], axis = 0, keepdims = True )
+        kouts_avg /= np.linalg.norm(kouts_avg)
+        
+        kins_avg = self.kins_avg/np.linalg.norm(self.kins_avg)
+        
+        angle = np.arccos(np.sum(kins_avg* kouts_avg))
+        angle = np.rad2deg(angle)
+        
+        self.est_ttheta[roi_name] = angle
+        
+        print(f"the initial 2theta angle is: {angle:.2f}")
+        
     @log_roi_params
     def compute_kins(self, roi_name, est_ttheta, method = "BFGS", gtol = 1e-6):
         """
@@ -511,25 +541,19 @@ class load_data:
             self.kin_coords[roi_name] = self.kout_coords[roi_name]
             return 
         
-        try:
-            self.kins_avg = np.mean(self.kouts["pupil"], axis = 0, keepdims = True )
-        except:
-            raise ValueError("Must compute pupil kouts first")
+        self.g_init[roi_name] = calc_qvec(self.kouts[roi_name], 
+                                          self.kins_avg)
 
-        kouts_avg = np.mean(self.kouts[roi_name], axis = 0, keepdims = True )
-        kouts_avg /= np.linalg.norm(kouts_avg)
+        self.kins[roi_name], self.optimal_angles[roi_name] = optimise_kin(self.g_init[roi_name], 
+                                                                          est_ttheta, 
+                                                                          self.kouts[roi_name], 
+                                                                          self.exp_params['wavelength'], 
+                                                                          method, gtol)
         
-        kins_avg = self.kins_avg/np.linalg.norm(self.kins_avg)
-        
-        angle = np.arccos(np.sum(kins_avg* kouts_avg))
-        angle = np.rad2deg(angle)
-        
-        print(f"the initial 2theta angle is: {angle}")
-        self.g_init[roi_name] = calc_qvec(self.kouts[roi_name], self.kins_avg, ttheta = est_ttheta, wavelength= self.exp_params['wavelength'])
-
-        self.kins[roi_name], self.optimal_angles[roi_name] = optimise_kin(self.g_init[roi_name], est_ttheta, self.kouts[roi_name], self.exp_params['wavelength'], method, gtol)
-        
-        self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], self.exp_params['det_psize'], self.exp_params['det_distance'], self.exp_params['centre_pixel'])
+        self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], 
+                                                           self.exp_params['det_psize'], 
+                                                           self.exp_params['det_distance'], 
+                                                           self.exp_params['centre_pixel'])
     @log_roi_params
     def refine_kins(self, roi_name, shifts):
         """
@@ -570,12 +594,14 @@ class load_data:
             offset (int, optional): An offset value to shift the streak selection up or down. Default is 0.
 
         """
-        mask = extract_parallel_line(self.kin_coords[roi_name], width=width, position=position, offset=offset)
+        mask = extract_parallel_line(self.kin_coords[roi_name], width=width, offset=offset)
         
         self.kins[roi_name] = self.kins[roi_name][mask]
         self.kin_coords[roi_name] = self.kin_coords[roi_name][mask]
         self.kouts[roi_name] = self.kouts[roi_name][mask]
         self.kout_coords[roi_name] = self.kout_coords[roi_name][mask]
+        self.coherent_imgs[roi_name] = self.coherent_imgs[roi_name][mask]
+        
     @log_roi_params
     def select_streak_region(self, roi_name, percentage=10, start_position='lowest', start_idx=None):
         """
@@ -600,6 +626,8 @@ class load_data:
         self.kin_coords[roi_name] = self.kin_coords[roi_name][mask]
         self.kouts[roi_name] = self.kouts[roi_name][mask]
         self.kout_coords[roi_name] = self.kout_coords[roi_name][mask]
+        self.coherent_imgs[roi_name] = self.coherent_imgs[roi_name][mask]
+        
     def order_pixels(self, roi_name):
         """Reorders the pixels of coherent images and corresponding k-vectors based on their distance from the center.
     
@@ -720,7 +748,8 @@ class load_data:
         """
         
         self.coherent_imgs[roi_name] = make_2dimensions_even(self.coherent_imgs[roi_name], num_jobs=self.num_jobs)
-    
+        self.averaged_coherent_images[roi_name] = make_2dimensions_even([self.averaged_coherent_images[roi_name]],
+                                                                        num_jobs=self.num_jobs)[0]
     
     @log_roi_params
     def apply_median_filter(self, roi_name, kernel_size, stride, threshold):
@@ -931,6 +960,24 @@ class load_data:
         plt.show()
     def plot_average_full_detector(self,vmin1=None, vmax1=None, 
                                         vmin2=None, vmax2=None):
+        """
+        Plots the averaged full detector data in both linear and logarithmic scales.
+
+        If the averaged full detector data is not already computed, it is calculated
+        by averaging over all data files in `self.fnames`, depending on the beamtime mode.
+        Hot pixels are masked from the final averaged data.
+
+        Args:
+            vmin1 (float, optional): Minimum value for the linear scale color map. Defaults to None.
+            vmax1 (float, optional): Maximum value for the linear scale color map. Defaults to None.
+            vmin2 (float, optional): Minimum value for the logarithmic scale color map. Defaults to None.
+            vmax2 (float, optional): Maximum value for the logarithmic scale color map. Defaults to None.
+
+        Displays:
+            A matplotlib figure with two subplots: 
+                - Left: Averaged detector data with linear intensity scale.
+                - Right: Logarithmically scaled intensity plot.
+        """
 
         if self.averaged_det_data["full_det"] is None:
             if self.beamtime == 'new':
@@ -1466,7 +1513,7 @@ class load_data:
     def save_roi_ptychograph(self, roi_name, file_path):
     
         """
-        Save the processed data and metadata to an HDF5 file.
+        Save the 4D data set for an roi to an HDF5 file.
     
         Args:
             roi_name (str): The ROI name for which the data should be saved.
@@ -1484,12 +1531,12 @@ class load_data:
     def load_roi_ptychograph(self, roi_name, file_path):
     
         """
-        Save the processed data and metadata to an HDF5 file.
+        Load the 4D data set for an roi from an HDF5 file.
     
         Args:
-            roi_name (str): The ROI name for which the data should be saved.
+            roi_name (str): The ROI name for which the data should be loaded.
 
-            file_path (str): The path where the HDF5 file will be saved.
+            file_path (str): The path where the HDF5 is stored.
         """
         print("Loading data ...")
         with h5py.File(file_path, "r") as h5f:

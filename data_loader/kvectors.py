@@ -70,8 +70,8 @@ def optimise_kin(G_init, ttheta, kouts, wavelength, method, gtol):
         G_opt =  opt_mat @ G_init[0]
         
     kin_opt = (kouts-G_opt)
-    kin_opt /= np.linalg.norm(kin_opt, axis = 1)[:,np.newaxis]
-    kin_opt *= 2*np.pi/wavelength
+    #kin_opt /= np.linalg.norm(kin_opt, axis = 1)[:,np.newaxis]
+    #kin_opt *= 2*np.pi/wavelength
 
     return kin_opt, optimal_angles
 
@@ -85,18 +85,7 @@ def calc_qvec(kout, kin, **kwargs):
     if len(kout.shape)>1:
         kout = np.mean(kout, axis = 0, keepdims = True)
     
-    kout /= np.linalg.norm(kout)
-    
-    kin_oaxis = kin / np.linalg.norm(kin)
-
-    G_0 = kout - kin_oaxis
-    G_0 /= np.linalg.norm(G_0, axis = 1, keepdims = True)
-    
-    if 'ttheta' and 'wavelength' in kwargs:
-        ttheta = kwargs['ttheta']
-        wavelength = kwargs['wavelength']
-        
-        G_0 *= 4*np.pi*np.sin(ttheta/2)/wavelength
+    G_0 = kout - kin
     
     return G_0
 
@@ -246,7 +235,7 @@ def extract_streak_region(kins, percentage=10, start_position='random', start_id
 
     return selected_mask
 
-def extract_parallel_line(kins, width=1, position='center', offset=0):
+def extract_parallel_line(kins, width=1, offset=0):
     """
     Extracts a parallel thin line (1-2 pixels wide) from a streak in the kin coordinates.
 
@@ -275,19 +264,24 @@ def extract_parallel_line(kins, width=1, position='center', offset=0):
     perpendicular_vec = np.array([-direction[1], direction[0]])  
     perp_dist = np.dot(kins_centered, perpendicular_vec) 
 
-    if position == 'center':
-        lower_bound = -width / 2
-        upper_bound = width / 2
-    elif position == 'top':
-        lower_bound = 2  
-        upper_bound = 2 + width
-    elif position == 'bottom':
-        lower_bound = -2 - width
-        upper_bound = -2
-    else:
-        lower_bound = offset
-        upper_bound = offset + width
+    
+    lower_bound = offset
+    upper_bound = offset + width
 
     selected_mask = (perp_dist >= lower_bound) & (perp_dist <= upper_bound)
 
     return selected_mask
+
+def calc_angle(vec1, vec2):
+    """
+    The angle between two vectors
+    """
+
+    angle = np.rad2deg(math.acos(np.dot(vec1,vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))))
+    return angle
+    
+def estimate_ttheta(kouts, pupil_kins):
+    avg_kins = np.mean(pupil_kins, axis=0)
+    avg_kout = np.mean(kouts, axis=0)
+    angle = calc_angle(avg_kout, avg_kins)
+    return angle
