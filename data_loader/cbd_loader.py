@@ -539,7 +539,10 @@ class load_data:
         if roi_name == 'pupil' or est_ttheta == 0:
             self.kins[roi_name] = self.kouts[roi_name]
             self.kin_coords[roi_name] = self.kout_coords[roi_name]
+            self.kins_avg = np.mean(self.kouts["pupil"], axis = 0, keepdims = True )
+            
             return 
+        
         
         self.g_init[roi_name] = calc_qvec(self.kouts[roi_name], 
                                           self.kins_avg)
@@ -594,7 +597,7 @@ class load_data:
             offset (int, optional): An offset value to shift the streak selection up or down. Default is 0.
 
         """
-        mask = extract_parallel_line(self.kins[roi_name], width=width, offset=offset)
+        mask = extract_parallel_line(self.kin_coords[roi_name], width=width, offset=offset)
         
         if inplace:
             self.kins[roi_name] = self.kins[roi_name][mask]
@@ -608,6 +611,7 @@ class load_data:
             
             return 
         else:
+            print(f'shape of mask is {mask.shape}')
             return mask
         
     @log_roi_params

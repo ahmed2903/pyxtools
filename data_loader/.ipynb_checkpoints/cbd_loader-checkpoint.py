@@ -539,7 +539,10 @@ class load_data:
         if roi_name == 'pupil' or est_ttheta == 0:
             self.kins[roi_name] = self.kouts[roi_name]
             self.kin_coords[roi_name] = self.kout_coords[roi_name]
+            self.kins_avg = np.mean(self.kouts["pupil"], axis = 0, keepdims = True )
+            
             return 
+        
         
         self.g_init[roi_name] = calc_qvec(self.kouts[roi_name], 
                                           self.kins_avg)
@@ -578,7 +581,7 @@ class load_data:
         self.kins[roi_name] = kin_opt
         self.kin_coords[roi_name] = reverse_kins_to_pixels(self.kins[roi_name], self.exp_params['det_psize'], self.exp_params['det_distance'], self.exp_params['centre_pixel'])
     @log_roi_params
-    def select_single_pixel_streak(self, roi_name, width=1, position='center', offset=0):
+    def select_single_pixel_streak(self, roi_name, width=1, offset=0, inplace = False):
 
         """
         Selects a single-pixel-wide streak along a specified direction in the region of interest (ROI).
@@ -594,13 +597,22 @@ class load_data:
             offset (int, optional): An offset value to shift the streak selection up or down. Default is 0.
 
         """
-        mask = extract_parallel_line(self.kin_coords[roi_name], width=width, offset=offset)
+        mask = extract_parallel_line(self.kin_coords[roi_name][:,:2], width=width, offset=offset)
         
-        self.kins[roi_name] = self.kins[roi_name][mask]
-        self.kin_coords[roi_name] = self.kin_coords[roi_name][mask]
-        self.kouts[roi_name] = self.kouts[roi_name][mask]
-        self.kout_coords[roi_name] = self.kout_coords[roi_name][mask]
-        self.coherent_imgs[roi_name] = self.coherent_imgs[roi_name][mask]
+        if inplace:
+            self.kins[roi_name] = self.kins[roi_name][mask]
+            self.kin_coords[roi_name] = self.kin_coords[roi_name][mask]
+            self.kouts[roi_name] = self.kouts[roi_name][mask]
+            self.kout_coords[roi_name] = self.kout_coords[roi_name][mask]
+            try:
+                self.coherent_imgs[roi_name] = self.coherent_imgs[roi_name][mask]
+            except:
+                print("coherent images are not calculated yet")
+            
+            return 
+        else:
+            print(f'shape of mask is {mask.shape}')
+            return mask
         
     @log_roi_params
     def select_streak_region(self, roi_name, percentage=10, start_position='lowest', start_idx=None):
