@@ -1437,7 +1437,7 @@ class load_data:
                 # func["functions"] will be the function name
                 func_name = func['function']
                 func.pop('function')
-                process_params.attrs[func['function']] = json.dumps(func)
+                process_params.attrs[func_name] = json.dumps(func)
 
 
             images = h5f.create_group("processed_images")
