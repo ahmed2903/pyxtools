@@ -11,7 +11,7 @@ import os
 import time
 
 from matplotlib.patches import Rectangle
-
+import copy
     
 from IPython.display import display
 import concurrent
@@ -47,6 +47,8 @@ class load_data:
         beamtime (str, optional): Identifier for the beamtime ('new' or 'old'). Defaults to 'new'.
         fast_axis_steps (optional): Step values for the fast axis in the scan. Defaults to None.
     """
+    
+    
     def __init__(self, directory:str, 
                  scan_num: int, 
                  det_psize:float, 
@@ -66,7 +68,16 @@ class load_data:
         self.slow_axis = slow_axis
         self.beamtime = beamtime
         self.fast_axis_steps = fast_axis_steps
-        
+
+        # self.params = {
+        #     "det_psize": det_psize,
+        #     "det_distance": det_distance,
+        #     "centre_pixel": centre_pixel,
+        #     "wavelength": wavelength,
+        #     "slow_axis": slow_axis,
+        #     "beamtime": beamtime,
+        #     "fast_axis_steps": fast_axis_steps
+        # }
 
         # Writing the directory of the selected scan number
         self.dir = f"{directory.rstrip('/')}/Scan_{scan_num}/" 
@@ -87,13 +98,63 @@ class load_data:
         self.coherent_imgs = {} 
         self.optimal_angles = {} # Euler angles that rotate Kout to Kin
         self.g_init = {} # Initial G vector for a Signal
-        
+
+        self.meta_prep = {}
         if self.beamtime == 'new': # Data structure 
             # New = 1 File per scan line
             # Old = 1 File for all
             self.fnames = list_datafiles(self.dir)[:-2]        
 
         self.num_jobs = num_jobs
+
+        self._checkpoint_stack = []
+        
+    
+       ################### Checkpointing ##################
+    def checkpoint_state(self):
+        state = {
+            'kins': copy.deepcopy(self.kins),
+            'kouts': copy.deepcopy(self.kouts),
+            'kin_coords': copy.deepcopy(self.kin_coords),
+            'kout_coords': copy.deepcopy(self.kout_coords),
+            'coherent_images': copy.deepcopy(self.coherent_imgs),
+            'optimal_angles': copy.deepcopy(self.optimal_angles),
+            'images_object': copy.deepcopy(self.images_object)
+        }
+        self._checkpoint_stack.append(state)
+        print(f"Checkpoint #{len(self._checkpoint_stack)} created.")
+    
+    def restore_checkpoint(self):
+        if not self._checkpoint_stack:
+            print("No checkpoints to restore.")
+            return
+        state = self._checkpoint_stack.pop()
+        self.kins = copy.deepcopy(state['kins'])
+        self.kouts = copy.deepcopy(state['kouts'])
+        self.kin_coords = copy.deepcopy(state['kin_coords'])
+        self.kout_coords = copy.deepcopy(state['kout_coords'])
+        self.coherent_imgs = copy.deepcopy(state['coherent_images'])
+        self.optimal_angles = copy.deepcopy(state['optimal_angles'])
+        self.images_object = copy.deepcopy(state['images_object'])
+        
+        print("Restored to previous checkpoint.")
+    
+    def auto_checkpoint(func):
+        def wrapper(self, *args, **kwargs):
+            self.checkpoint_state()
+            return func(self, *args, **kwargs)
+        return wrapper
+
+    def save_it(func):
+        def wrapper(*args,**kwargs):
+            
+            result = func(*args,**kwargs)
+            
+            self.meta_prep[func.__name__] = f"{args}, {kwargs}"
+            
+            return result
+        return wrapper 
+
     ################### Loading data ###################
     def make_4d_dataset(self, roi_name: str, mask_max_coh=False, mask_min_coh= False):
         
@@ -1252,4 +1313,49 @@ class load_data:
 
         if align_cohimgs:
             self.align_coherent_images(roi_name)
+
+
+ 
+    def write_process_data(self, roi_name: str):
+        with h5py.File("data_" + roi_name + ".h5", 'w') as df: 
+            data_group = df.create_group('data')
+            metadata_group = df.create_group('metadata')
+            detector_group = df.create_group('detector_data')
+            detector_metadata = detector_group.create_group('metadata')
+            
+            data_group.create_dataset('coh_imgs', data=self.coherent_imgs[roi_name])
+            data_group.create_dataset('kin_pupil', data=self.kin_coords[roi_name])
+            
+            metadata_group.create_dataset('det_pixel_size', data=self.det_psize)  
+            metadata_group.create_dataset('detector_distance', data=self.det_distance)  
+            metadata_group.create_dataset('wavelength', data=self.wavelength)  
+            metadata_group.create_dataset('beamtime', data=self.beamtime)  
+            
+            detector_group.create_dataset('mean_data', data=self.averaged_data[roi_name])  
+
+            #detector_metadata
+    
+    # def write_process_data(self, roi_name: str):
+    #     """
+    #     """
+    #     with h5py.File("data_" + roi_name + ".h5", 'w') as df: 
+    #         data_group = df.create_group('coherent_image_data')
+    #         metadata_group = data_group.create_group('metadata')
+            
+    #         detector_group = df.create_group('detector_data')
+    #         detector_metadata = detector_group.create_group('metadata')
         
+    #         data_group.create_dataset('coherent_images', data=self.coherent_imgs[roi_name])
+    #         data_group.create_dataset(f'kin_{roi_name}', data=self.kin_coords[roi_name])
+
+    #         for key, value in self.params.items():
+    #             if isinstance(value, (list, tuple)):
+    #                 metadata_group.attrs[key] = np.array(value)
+    #             elif isinstance(value, (str, int, float, bool, np.number)) or value is None:
+    #                 metadata_group.attrs[key] = value
+    #             else:
+    #                 print(f"Warning: Parameter {key} of type {type(value)} might not be properly saved")
+                
+    #         detector_group.create_dataset('mean_data', data=self.averaged_data[roi_name])  
+
+

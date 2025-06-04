@@ -28,7 +28,19 @@ def time_it(func):
         print(f"Function '{func.__name__}' executed in {execution_time:.6f} seconds")
         return result  # Return original function result
     return wrapper
-    
+
+def get_meta_data(func):
+    """Decorator to save the meta_data elements in the function"""
+    meta_dat = []
+    @functools.wraps(func)  # Preserve function metadata
+    def wrapper(*args, **kwargs):
+        result = func(*args, **kwargs)  # Execute the function
+        scalars = [arg for arg in args if not isinstance(arg, (list, tuple, dict))]
+        meta_dat.append(scalars)
+        return result  # Return original function result
+        # Attach the metadata list to the wrapper so it's accessible
+    wrapper.meta_data = meta_dat
+    return wrapper
 
 def indexQ(Qvec, rlv):
     """_summary_
