@@ -595,9 +595,10 @@ class load_data:
             position (str, optional): The position of the streak relative to the main region.
                 Options: 'center', 'top', 'bottom'. Default is 'center'.
             offset (int, optional): An offset value to shift the streak selection up or down. Default is 0.
+            inplace (bool): if True, it changes the kin_coords, kins, kouts, and kout_coords dict for that roi, if false, if returns the mask. (default = False)
 
         """
-        mask = extract_parallel_line(self.kin_coords[roi_name][:,:2], width=width, offset=offset)
+        mask = extract_parallel_line(self.kin_coords[roi_name], width=width, offset=offset)
         
         if inplace:
             self.kins[roi_name] = self.kins[roi_name][mask]
@@ -1437,7 +1438,7 @@ class load_data:
                 # func["functions"] will be the function name
                 func_name = func['function']
                 func.pop('function')
-                process_params.attrs[func['function']] = json.dumps(func)
+                process_params.attrs[func_name] = json.dumps(func)
 
 
             images = h5f.create_group("processed_images")

@@ -595,6 +595,7 @@ class load_data:
             position (str, optional): The position of the streak relative to the main region.
                 Options: 'center', 'top', 'bottom'. Default is 'center'.
             offset (int, optional): An offset value to shift the streak selection up or down. Default is 0.
+            inplace (bool): if True, it changes the kin_coords, kins, kouts, and kout_coords dict for that roi, if false, if returns the mask. (default = False)
 
         """
         mask = extract_parallel_line(self.kin_coords[roi_name], width=width, offset=offset)

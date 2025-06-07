@@ -12,7 +12,8 @@ from phase_retrieval import epry_class
 from phase_retrieval import utils_pr
 from tqdm import tqdm
 import hdf5plugin
-
+from time import strftime
+time_str = strftime("%Y-%m-%d_%H.%M")
 ############# USER INPUT #################
 
 # experimental params
@@ -53,7 +54,6 @@ gold = db.load_data(
 gold.add_roi(roi_name = "pupil" , roi = [2190,2295,2110,2230])
 pupil_kout_mask = 80
 pupil_NA_mask = 1e3
-streak_mask = 1
 mask_region_pupil = [10,100,4,10]
 
 # streak
@@ -62,7 +62,7 @@ streak_mask = .5
 est_ttheta = 34.329
 
 # streak offsets
-offsets = range(-5,5)
+offsets = range(-7,7)
 
 iterations = 500
 
@@ -109,7 +109,8 @@ for i, offset in enumerate(tqdm(offsets, total = N)):
     
     imgs = gold.coherent_imgs['streak'][mask]
     kins = gold.kins['streak'][mask]
-
+    kins_pupil = gold.kins['pupil']
+    
     print(f"shape of the images is {imgs.shape}")
     print(f"sum of images in this streak is {np.sum(mask)}")
     
@@ -117,7 +118,7 @@ for i, offset in enumerate(tqdm(offsets, total = N)):
             pupil_func = None, 
             hr_fourier_image = init_fourier,
             kout_vec = kins,
-            ks_pupil = kins,
+            ks_pupil = kins_pupil,
             lr_psize = exp.step_size,
             alpha = .2, 
             beta = .9)
@@ -128,4 +129,4 @@ for i, offset in enumerate(tqdm(offsets, total = N)):
     full_arr[i,:,:] += epry.hr_obj_image
     
 
-np.save("3d_recon.npy",full_arr)
+np.save(f"/home/mohahmed/Analysis_P11/recon_results_2023_39x/3d_recon_{time_str}.npy", full_arr)
