@@ -67,16 +67,20 @@ class ROI:
             self.__averaged_det_images = np.mean(self.data_4d, axis=(0,1))
             
         return self.__averaged_det_images
-    
+
+    def update_averaged_det_images(self):
+        self.__averaged_det_images = np.mean(self.data_4d, axis=(0,1))
+        
     @property
     def averaged_coherent_images(self):
         
         if self.__averaged_coherent_images is None:
             self.__averaged_coherent_images = np.mean(self.data_4d, axis=(2,3))
-            
+        
         return self.__averaged_coherent_images
 
-    
+    def update_averaged_coherent_images(self):
+        self.__averaged_coherent_images = np.mean(self.data_4d, axis=(2,3))
     
 class load_data:
     """
@@ -147,7 +151,7 @@ class load_data:
         self._checkpoint_stack = []
         
         self.averaged_full_det_data = None
-        self.rois_dict["full_det"] = [0,-1,0,-1]
+        self.rois["full_det"] = ROI([0,-1,0,-1])
         
     ################### Checkpointing ##################
     def checkpoint_state(self):
@@ -221,9 +225,6 @@ class load_data:
                 roi_name = kwargs['roi_name']
                 mod_kwargs.pop("roi_name")
                 assert len(args) == 0 
-                
-            if roi_name not in self.log_roi_params:
-                self.rois[roi_name].log_params = []
         
             entry = {
                 "function": func.__name__,
@@ -237,7 +238,6 @@ class load_data:
         return wrapper
         
     ################### Loading data ###################
-    @log_roi_params
     def add_roi(self, roi_name:str , roi_coords:list):
         """Adds a region of interest (ROI) to the dictionary.
 
@@ -302,7 +302,7 @@ class load_data:
             self.pupil_size: The estimated pupil size, computed using the averaged pupil data
             and the given mask threshold.
         """
-        self.pupil_size = estimate_pupil_size(self.rois['pupil'].averaged_det_data, 
+        self.pupil_size = estimate_pupil_size(self.rois['pupil'].averaged_det_images, 
                            mask_val=mask_val,
                            pixel_size=self.exp_params['det_psize'])
 
@@ -444,10 +444,13 @@ class load_data:
         sx,ex,sy,ey = region
         if mode == 'zeros':
             self.rois[roi_name].data_4d[:,:,sx:ex,sy:ey] = 0.0
+            self.rois[roi_name].update_averaged_det_images()
         elif mode == 'median':
             self.rois[roi_name].data_4d[:,:,sx:ex,sy:ey] = np.median(self.rois[roi_name].data_4d, axis = (2,3))[:,:,np.newaxis, np.newaxis]
+            self.rois[roi_name].update_averaged_det_images()
         elif mode == 'ones':
             self.rois[roi_name].data_4d[:,:,sx:ex,sy:ey] = 1.0
+            self.rois[roi_name].update_averaged_det_images()
     
     
     ################### Compute k_in vectors ###################
@@ -467,9 +470,9 @@ class load_data:
                               computation.
     
         """
-        self.rois[roi_name].kout_coords = make_coordinates(self.self.rois[roi_name].averaged_det_data, 
+        self.rois[roi_name].kout_coords = make_coordinates(self.rois[roi_name].averaged_det_images, 
                                                                 mask_val, 
-                                                                self.self.rois[roi_name].roi_coords, 
+                                                                self.rois[roi_name].roi_coords, 
                                                                 crop=False)
         
         self.rois[roi_name].kouts = compute_vectors(self.rois[roi_name].kout_coords, 
@@ -531,8 +534,8 @@ class load_data:
         """
 
         if roi_name == 'pupil' or est_ttheta == 0:
-            self.rois[roi_name].kins = self.kouts[roi_name]
-            self.rois[roi_name].kin_coords = self.kout_coords[roi_name]
+            self.rois[roi_name].kins = self.rois[roi_name].kouts
+            self.rois[roi_name].kin_coords = self.rois[roi_name].kout_coords
             self.kins_avg = np.mean(self.rois['pupil'].kouts, axis = 0, keepdims = True )
             
             return 
@@ -903,11 +906,14 @@ class load_data:
         self.rois[roi_name].coherent_imgs = np.array(self.rois[roi_name].coherent_imgs)
         if mode == 'zeros':
             self.rois[roi_name].coherent_imgs[:,sx:ex,sy:ey] = 0.0
+            self.rois[roi_name].update_averaged_coherent_images()
         elif mode == 'median':
             self.rois[roi_name].coherent_imgs[:,sx:ex,sy:ey] = np.median(self.rois[roi_name].coherent_imgs, 
                                                                         axis = (1,2))[:,np.newaxis, np.newaxis]
+            self.rois[roi_name].update_averaged_coherent_images()
         elif mode == 'ones':
             self.rois[roi_name].coherent_imgs[:,sx:ex,sy:ey] = 1.0
+            self.rois[roi_name].update_averaged_coherent_images()
     def align_coherent_images(self, roi_name):
         """Aligns a list of coherent images for a given region of interest (ROI).
 
@@ -954,7 +960,7 @@ class load_data:
             with h5py.File(file_name,'r') as f:
                 data_test = f['/entry/data/data'][frame_no,:,:]
         else:
-            data_test = stack_4d_data_old(self.dir, self.rois_dict['full_det'], self.exp_params['fast_axis_steps'], self.exp_params['slow_axis'])[file_no,frame_no, :,:]
+            data_test = stack_4d_data_old(self.dir, self.rois['full_det'].roi_coords, self.exp_params['fast_axis_steps'], self.exp_params['slow_axis'])[file_no,frame_no, :,:]
 
         data_test = mask_hot_pixels(data_test)
         fig, axes = plt.subplots(1, 2, figsize=(10,5))
@@ -1006,7 +1012,7 @@ class load_data:
                     with h5py.File(file_name,'r') as f:
                         data_avg += np.mean(f['/entry/data/data'][:,:,:], axis = 0)
             else:
-                data_avg = np.mean(stack_4d_data_old(self.dir, self.rois_dict['full_det'], 
+                data_avg = np.mean(stack_4d_data_old(self.dir, self.rois['full_det'].roi_coords, 
                                                      self.exp_params['fast_axis_steps'], self.exp_params['slow_axis']), axis = (0,1))
     
             self.averaged_full_det_data = data_avg
@@ -1329,7 +1335,7 @@ class load_data:
             A plot of the averaged frames for the specified ROI, with the given color scale.
         """
         
-        plot_roi_from_numpy(self.rois[roi_name].averaged_det_data, [0,-1,0,-1], 
+        plot_roi_from_numpy(self.rois[roi_name].averaged_det_images, [0,-1,0,-1], 
                             f"Averaged Frames for {roi_name}", 
                             vmin=vmin, vmax=vmax )
         
@@ -1386,7 +1392,7 @@ class load_data:
             title (str, optional): Title of the plot. Default is "Mapped kins onto pupil".
             cmap (str, optional): Colormap to use for visualization. Default is "viridis".
         """
-        plot_map_on_detector(self.rois["pupil"].averaged_det_data, self.rois[roi_name].kin_coords, 
+        plot_map_on_detector(self.rois["pupil"].averaged_det_images, self.rois[roi_name].kin_coords, 
                              vmin, vmax, title, cmap, crop=False, roi= self.roi_coords["pupil"])
 
     def plot_kouts(self, roi_name, vmin=None, vmax = None, title="Mapped kouts", cmap = "viridis"):
@@ -1403,7 +1409,7 @@ class load_data:
             title (str, optional): Title of the plot. Default is "Mapped kouts".
             cmap (str, optional): Colormap to use for visualization. Default is "viridis".
         """
-        plot_map_on_detector(self.rois[roi_name].averaged_det_data, self.rois[roi_name].kout_coords, 
+        plot_map_on_detector(self.rois[roi_name].averaged_det_images, self.rois[roi_name].kout_coords, 
                              vmin, vmax, title, cmap, crop=False,roi= self.rois[roi_name].roi_coords)
     
     ################## Save and Load #####################
@@ -1434,7 +1440,7 @@ class load_data:
             for key, value in self.lens_params.items():
                 exp_params.attrs[key] = json.dumps(value)
                 
-            for func in self.log_roi_params[roi_name]:
+            for func in self.roi[roi_name].log_params:
                 # self.log_roi_params[roi_name] is a list, each element correponds to a function 
                 # func is then a dictionary
                 # func["functions"] will be the function name
@@ -1449,13 +1455,13 @@ class load_data:
                 images.create_dataset("average_coherent_images", 
                                       data=self.rois[roi_name].averaged_coherent_images, compression="gzip")
                 images.create_dataset("averaged_detector_roi", 
-                                      data=self.rois[roi_name].averaged_det_data, compression="gzip")
+                                      data=self.rois[roi_name].averaged_det_images, compression="gzip")
             except:
                 self.average_frames_roi(roi_name)
                 images.create_dataset("average_coherent_images", 
                                       data=self.rois[roi_name].averaged_coherent_images, compression="gzip")
                 images.create_dataset("averaged_detector_roi", 
-                                      data=self.rois[roi_name].averaged_det_data, compression="gzip")
+                                      data=self.rois[roi_name].averaged_det_images, compression="gzip")
         
             try:
                 images.create_dataset("averaged_full_detector", 
@@ -1526,7 +1532,7 @@ class load_data:
                 self.coherent_imgs = {}
             self.coherent_imgs[roi_name] = images["coherent_images"][...]
             self.averaged_coherent_images[roi_name] = images["average_coherent_images"][...]
-            self.averaged_det_data[roi_name] = images["averaged_detector_roi"][...]
+            self.averaged_det_images[roi_name] = images["averaged_detector_roi"][...]
             # Load K-Vectors 
             kvectors = h5f["kvectors"]
             for attr in ["kins", "kouts", "kin_coords", "kout_coords"]:
@@ -1606,7 +1612,7 @@ class load_data:
         
         """
         
-        self.rois[roi_name].data_4d = self.make_4d_dataset(self.rois[roi_name].roi_coords)
+        self.make_4d_dataset(roi_name)
 
         if normalisation_roi is not None:
             self.normalise_detector(roi_name, normalisation_roi)
@@ -1691,10 +1697,9 @@ class load_data:
         self.make_coherent_images(roi_name=roi_name)
         if mask_region is not None:
             self.mask_region_cohimgs(roi_name, mask_region, mode = 'median')
-            
         if variance_threshold is not None:
             self.filter_coherent_images(roi_name=roi_name, variance_threshold=variance_threshold)
-
+            
         if order_imgs:
             self.order_pixels(roi_name)
         if mask_threshold is not None:

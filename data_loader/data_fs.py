@@ -135,7 +135,7 @@ def stack_data(data_folder, names_array, roi, conc = True):
     return stacked_data
     
 @time_it 
-def stack_4d_data(data_folder,names_array,roi, slow_axis = 0, conc = False, num_jobs = 4):
+def stack_4d_data(data_folder, names_array, roi, slow_axis = 0, conc = False, num_jobs = 4):
 
     
     nx = roi[1] - roi[0] # roi vertical size
