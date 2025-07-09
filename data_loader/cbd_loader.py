@@ -70,6 +70,10 @@ class ROI:
 
     def update_averaged_det_images(self):
         self.__averaged_det_images = np.mean(self.data_4d, axis=(0,1))
+
+    @averaged_det_images.setter
+    def averaged_det_images(self, value):
+        self.__averaged_det_images = value
         
     @property
     def averaged_coherent_images(self):
@@ -78,7 +82,11 @@ class ROI:
             self.__averaged_coherent_images = np.mean(self.data_4d, axis=(2,3))
         
         return self.__averaged_coherent_images
-
+    
+    @averaged_coherent_images.setter
+    def averaged_coherent_images(self, value):
+        self.__averaged_coherent_images = value
+        
     def update_averaged_coherent_images(self):
         self.__averaged_coherent_images = np.mean(self.data_4d, axis=(2,3))
     
@@ -414,7 +422,11 @@ class load_data:
         try:
             peak_intensity = np.sum(self.rois[reference_roi].data_4d, axis=(-2,-1))
         except: 
-            raise ValueError(f"{reference_roi} is Not Defined")
+            self.make_4d_dataset(reference_roi)
+            print(np.sum(self.rois[reference_roi].data_4d.shape))
+            peak_intensity = np.sum(self.rois[reference_roi].data_4d, axis=(-2,-1))
+            print(peak_intensity.shape)
+        
         
         avg_intensity = np.mean(peak_intensity)
         self.rois[roi_name].data_4d = self.rois[roi_name].data_4d/peak_intensity[...,np.newaxis, np.newaxis] * avg_intensity
@@ -544,7 +556,7 @@ class load_data:
         self.rois[roi_name].g_init = calc_qvec(self.rois[roi_name].kouts, 
                                           self.kins_avg)
 
-        self.rois[roi_name].kins, self.optimal_angles[roi_name] = optimise_kin(self.rois[roi_name].g_init, 
+        self.rois[roi_name].kins, self.rois[roi_name].optimal_angles = optimise_kin(self.rois[roi_name].g_init, 
                                                                           est_ttheta, 
                                                                           self.rois[roi_name].kouts, 
                                                                           self.exp_params['wavelength'], 
@@ -610,7 +622,7 @@ class load_data:
             except:
                 print("coherent images are not calculated yet")
             
-            return 
+            return  
         else:
             print(f'shape of mask is {mask.shape}')
             return mask
@@ -652,7 +664,7 @@ class load_data:
             roi_name (str): The name of the region of interest (ROI) for which the pixels 
                              and k-vectors will be reordered.
         """
-        sorted_indices = reorder_pixels_from_center(self.rois[roi_name].kouts, connected_array=np.array(self.coherent_imgs[roi_name]))
+        sorted_indices = reorder_pixels_from_center(self.rois[roi_name].kouts, connected_array=np.array(self.rois[roi_name].coherent_imgs))
         
         # Debugging: Print types and shapes
         print(f"sorted_indices dtype: {sorted_indices.dtype}, shape: {sorted_indices.shape}")
@@ -695,8 +707,8 @@ class load_data:
         for i, coord in enumerate(self.rois[roi_name].kout_coords):
             
             
-            xp =  coord[0] - self.rois[roi_name].rois_coords[0]
-            yp =  coord[1] - self.rois[roi_name].rois_coords[2]
+            xp =  coord[0] - self.rois[roi_name].roi_coords[0]
+            yp =  coord[1] - self.rois[roi_name].roi_coords[2]
 
             coherent_imgs.append(make_coherent_image(self.rois[roi_name].data_4d, np.array([xp,yp])))
 
@@ -1393,7 +1405,7 @@ class load_data:
             cmap (str, optional): Colormap to use for visualization. Default is "viridis".
         """
         plot_map_on_detector(self.rois["pupil"].averaged_det_images, self.rois[roi_name].kin_coords, 
-                             vmin, vmax, title, cmap, crop=False, roi= self.roi_coords["pupil"])
+                             vmin, vmax, title, cmap, crop=False, roi= self.rois["pupil"].roi_coords)
 
     def plot_kouts(self, roi_name, vmin=None, vmax = None, title="Mapped kouts", cmap = "viridis"):
         
@@ -1530,9 +1542,9 @@ class load_data:
             images = h5f["processed_images"]
             if not hasattr(self, 'coherent_imgs'):
                 self.coherent_imgs = {}
-            self.coherent_imgs[roi_name] = images["coherent_images"][...]
-            self.averaged_coherent_images[roi_name] = images["average_coherent_images"][...]
-            self.averaged_det_images[roi_name] = images["averaged_detector_roi"][...]
+            self.rois[roi_name].coherent_imgs = images["coherent_images"][...]
+            self.rois[roi_name].averaged_coherent_images = images["average_coherent_images"][...]
+            self.rois[roi_name].averaged_det_images = images["averaged_detector_roi"][...]
             # Load K-Vectors 
             kvectors = h5f["kvectors"]
             for attr in ["kins", "kouts", "kin_coords", "kout_coords"]:
