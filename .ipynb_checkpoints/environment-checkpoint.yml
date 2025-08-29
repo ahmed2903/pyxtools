@@ -1,0 +1,54 @@
+name: pyxtools
+channels:
+  - conda-forge
+dependencies:
+  # Python
+  - python==3.10
+
+  # Core ML libraries
+  - pytorch
+  - jax
+ 
+  # Scientific computing
+  - numpy
+  - scipy
+
+  # Machine learning
+  - scikit-learn
+
+  # Visualization
+  - matplotlib
+  - plotly
+
+  # Jupyter ecosystem
+  - jupyter
+  - jupyterlab
+  - notebook
+  - ipywidget-ipympl
+
+  # Development tools
+  - pip
+  - tqdm
+
+  # Image processing
+  - pillow
+  - opencv
+
+  # Experiment tracking and ML lifecycle
+  - tensorboard0
+  - wandb  # For experiment tracking (optional)
+  - mlflow # For ML lifecycle management (optional)
+
+  # h5py
+  - h5py
+  - hdf5plugin
+
+
+
+
+
+# Installation instructions:
+# 1. Save this file as environment.yml
+# 2. Run: conda env create -f environment.yml
+# 3. Activate: conda activate ml_project
+# 4. Run the Python script: python cifar10_classification.py

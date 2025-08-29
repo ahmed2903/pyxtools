@@ -13,12 +13,20 @@ from scipy.ndimage import fourier_shift
 from PIL import Image
 #from ..data_fs import * #downsample_array, upsample_images, pad_to_double
 
+from skimage.restoration import unwrap_phase
+from .utils_zernike import *
+
 class EPRy:
     
     def __init__(self, images, pupil_func: str, kout_vec, ks_pupil, 
                  lr_psize, alpha=0.1, beta=0.1, 
                  hr_obj_image=None, hr_fourier_image=None,
                  num_jobs=4):
+
+        '''
+        images : coherent Images
+        pupil_func : pupil function
+        '''
         
         self.images = images # Coherent images
         self.num_images = self.images.shape[0]
@@ -38,6 +46,8 @@ class EPRy:
 
         self.zoom_factor = 1
         self.num_jobs = num_jobs
+
+        self.Npupil_rows, self.Npupil_cols = self.pupil_func.shape
 
     ############################# Prepare ################################
     @time_it
@@ -138,14 +148,17 @@ class EPRy:
             self.iter_loss = 0
             #for i, (image, kx_iter, ky_iter) in enumerate(tqdm(zip(self.images, self.kout_vec[:, 0], self.kout_vec[:, 1]), 
             #                                                   desc="Processing", total=len(self.images), unit="images")):
+            
+
             for i, (image, kx_iter, ky_iter) in enumerate(zip(self.images, self.kout_vec[:, 0], self.kout_vec[:, 1])):
                 
                 self._update_spectrum(image, kx_iter, ky_iter)
-                
+
                 if np.any(np.isnan(self.hr_fourier_image)):
                     raise ValueError(f"There is a Nan in the Fourier image for {it}-th iteration,{i}-th image")
                 if np.any(np.isnan(self.hr_obj_image)):
                     raise ValueError(f"There is a Nan in the Object image for {it}-th iteration,{i}-th image")
+                
                 
             if live_plot:
                 # Update the HR object image after all spectrum updates in this iteration
@@ -311,6 +324,9 @@ class EPRy:
         clear_output(wait=True)
         display(fig)
         fig.canvas.flush_events()
+
+    ## plotting pupil function inner iteration
+    
     
     def plot_rec_obj(self, 
                      vmin1= None, vmax1=None, 
@@ -477,6 +493,7 @@ class EPRy_lr(EPRy):
         # Update Pupil Function 
         weight_factor_obj = self.beta * self.compute_weight_fac(self.hr_fourier_image)
         self.pupil_func[kx_lidx:kx_hidx, ky_lidx:ky_hidx] += weight_factor_obj * delta_lowres_ft
+        self.pupil_patch = self.pupil_func[kx_lidx:kx_hidx, ky_lidx:ky_hidx]
 
         image_lr_new = np.abs(ifft2(ifftshift(self.hr_fourier_image*self.pupil_func[kx_lidx:kx_hidx, ky_lidx:ky_hidx])))**2
         
@@ -568,4 +585,354 @@ class EPRy_pad(EPRy_lr):
 
         self.images = pad_to_double_parallel(self.images, n_jobs=self.num_jobs)
         self.images = np.array(self.images)
+
+
+
+class EPRy_zern(EPRy_lr):  
+
+    def _update_spectrum(self, image, kx_iter, ky_iter):
+        """Handles the Fourier domain update."""
+        kx_cidx = round((kx_iter - self.kx_min_n) / self.dkx)
+        kx_lidx = round(max(kx_cidx - self.omega_obj_x / (2 * self.dkx), 0))
+        kx_hidx = round(kx_cidx + self.omega_obj_x / (2 * self.dkx)) + (1 if self.nx_lr % 2 != 0 else 0)
         
+        ky_cidx = round((ky_iter - self.ky_min_n) / self.dky)
+        ky_lidx = round(max(ky_cidx - self.omega_obj_y / (2 * self.dky), 0))
+        ky_hidx = round(ky_cidx + self.omega_obj_y / (2 * self.dky)) + (1 if self.ny_lr % 2 != 0 else 0)
+        
+        pupil_func_patch = self.pupil_func[kx_lidx:kx_hidx, ky_lidx:ky_hidx]
+        image_FT = self.hr_fourier_image * pupil_func_patch
+        
+        #image_lr = fftshift(ifft2(ifftshift(image_FT)))
+        image_lr = ifft2(ifftshift(image_FT))
+        image_lr_update = np.sqrt(image) * np.exp(1j * np.angle(image_lr))
+        image_FT_update = fftshift(fft2(image_lr_update)) 
+
+        weight_fac_pupil = self.alpha * self.compute_weight_fac(pupil_func_patch)
+        
+        # Update fourier spectrum
+        delta_lowres_ft = image_FT_update - image_FT
+        self.hr_fourier_image += delta_lowres_ft *  weight_fac_pupil
+
+        if np.any(np.isnan(self.hr_fourier_image)):
+            raise ValueError("There is a Nan value, check the configurations ")
+            
+        # Update Pupil Function 
+        weight_factor_obj = self.beta * self.compute_weight_fac(self.hr_fourier_image)
+        self.pupil_func[kx_lidx:kx_hidx, ky_lidx:ky_hidx] += weight_factor_obj * delta_lowres_ft
+
+        
+        image_lr_new = np.abs(ifft2(ifftshift(self.hr_fourier_image*self.pupil_func[kx_lidx:kx_hidx, ky_lidx:ky_hidx])))**2
+        
+        self.iter_loss += self._compute_loss(image_lr_new, image)
+      
+    @time_it
+    def iterate(self, iterations:int, live_plot=False, save_gif=False, do_projection_zern = True):
+
+        if live_plot:
+            fig, ax, img_amp, img_phase, fourier_amp, loss_im, axes = self._initialize_live_plot()
+        if save_gif:
+  
+            frame_files = []
+        for it in range(iterations):
+            
+            self.iter_loss = 0
+
+            for i, (image, kx_iter, ky_iter) in enumerate(zip(self.images, self.kout_vec[:, 0], self.kout_vec[:, 1])):
+                
+                self._update_spectrum(image, kx_iter, ky_iter)
+
+                if np.any(np.isnan(self.hr_fourier_image)):
+                    raise ValueError(f"There is a Nan in the Fourier image for {it}-th iteration,{i}-th image")
+                if np.any(np.isnan(self.hr_obj_image)):
+                    raise ValueError(f"There is a Nan in the Object image for {it}-th iteration,{i}-th image")
+                
+                
+            if live_plot:
+                # Update the HR object image after all spectrum updates in this iteration
+                self.hr_obj_image = ifft2(ifftshift(self.hr_fourier_image))
+                self._update_live_plot(img_amp, img_phase, fourier_amp, loss_im, fig, it, axes)
+            if save_gif:
+                # Save the frame
+                frame_file = f"tmp/frame_{it}.png"
+                plt.savefig(frame_file)
+                frame_files.append(frame_file)
+
+            self.losses.append(self.iter_loss/self.num_images)
+            self.iters_passed += 1
+
+            if do_projection_zern : #and it%10 == 0
+                # Extracting the ROI from the pupil_func over which we have
+                # pupil phase values, before imposing the Zernike constraint
+                print(f"Projection Zernike executes")
+                this_pupil = self._extract_pupil(self.pupil_func)
+                this_pupil_phase = np.angle(this_pupil)
+                # Enforce Zernike constraint on pupil phase
+                phase_pupil_patch = self._Zernike_proj(this_pupil_phase)
+                this_pupil = np.exp(1j*phase_pupil_patch) #np.abs(this_pupil)* np.exp(1j*phase_pupil_patch)
+                self.pupil_func = self._assemble_pupil(this_pupil)            
+
+        if save_gif:
+            # Create the GIF using Pillow
+            frames = [Image.open(file) for file in frame_files]
+            frames[0].save(
+                "recon_gif.gif",
+                save_all=True,
+                append_images=frames[4:],
+                duration=400,  # in milliseconds
+                loop=0
+            )
+            
+            # Cleanup temporary frame files
+            for file in frame_files:
+                os.remove(file)
+                
+        self.hr_obj_image = ifft2(ifftshift(self.hr_fourier_image))
+
+    def _extract_pupil(self, pupil_arr):
+        '''
+        This is the helper method for imposing 
+        Zernike constraint
+        Extract the pupil ROI from pupil_arr over which the pupil phase is defined 
+        '''
+
+        shape_r, shape_c = pupil_arr.shape
+        rl = shape_r//2 - self.Npupil_rows//2
+        rh = (shape_r//2 + self.Npupil_rows//2) + 1
+        cl = shape_c//2 - self.Npupil_cols//2
+        ch = (shape_c//2 + self.Npupil_cols//2) + 1
+        pupil_arr_cropped = pupil_arr[rl: rh, cl : ch]
+        return pupil_arr_cropped
+
+    def _assemble_pupil(self, pupil_arr_cropped):
+        '''
+        This is the helper method for imposing 
+        Zernike constraint
+        Put back the pupil_arr_cropped to pupil_arr 
+        '''
+        shape_r, shape_c = self.pupil_func.shape
+
+
+        rl = shape_r//2 - self.Npupil_rows//2
+        rh = (shape_r//2 + self.Npupil_rows//2) + 1
+        cl = shape_c//2 - self.Npupil_cols//2
+        ch = (shape_c//2 + self.Npupil_cols//2) + 1
+        
+        pupil_arr = self.pupil_func
+        pupil_arr [rl : rh, cl: ch] = pupil_arr_cropped 
+
+        return pupil_arr
+
+    def _Zernike_proj(self, wavefront):
+        '''
+        This function impose Zernike constraint on the given phase wavefront
+        
+        '''
+        shape_y, shape_x = wavefront.shape
+        
+        wavefront_range = wavefront.max() - wavefront.min()
+
+        if wavefront_range > 2*np.pi:
+            wavefront = unwrap_phase(wavefront)
+
+        # Constructing the wavefront using Zernike 
+
+        square_poly = SquarePolynomials() 
+
+        # Create coordinate grids
+        side_x = np.linspace(-1/np.sqrt(2), 1/np.sqrt(2), shape_x)
+        side_y = np.linspace(-1/np.sqrt(2), 1/np.sqrt(2), shape_y)
+
+        X, Y = np.meshgrid(side_x, side_y)
+        xdata = [X, Y]
+
+        coeffs = extract_square_coefficients_vectorized(wavefront)
+
+        all_results = square_poly.evaluate_all(xdata, coeffs)
+        new_wavefront = sum(all_results.values())
+
+        return new_wavefront
+
+
+    
+
+
+class EPRy_regularize(EPRy_lr):
+
+    @time_it
+    def iterate(self, iterations:int, live_plot=False, live_pupil_plot = True, save_gif=False):
+        '''
+        EPRY serial iterations
+        '''
+
+        if live_plot:
+            fig, ax, img_amp, img_phase, fourier_amp, loss_im, axes = self._initialize_live_plot()
+        if save_gif:
+  
+            frame_files = []
+        for it in range(iterations):
+            
+            self.iter_loss = 0
+            #for i, (image, kx_iter, ky_iter) in enumerate(tqdm(zip(self.images, self.kout_vec[:, 0], self.kout_vec[:, 1]), 
+            #                                                   desc="Processing", total=len(self.images), unit="images")):
+            if live_pupil_plot:
+                fig, axes, pupil_img_amp, pupil_img_phase = self._initialize_pupil_plot()
+
+            for i, (image, kx_iter, ky_iter) in enumerate(zip(self.images, self.kout_vec[:, 0], self.kout_vec[:, 1])):
+                
+                self._update_spectrum(image, kx_iter, ky_iter)
+
+                if live_pupil_plot and i % 10 == 0:
+                    self._update_pupil_plot(pupil_img_amp, pupil_img_phase, fig, axes) 
+
+                if np.any(np.isnan(self.hr_fourier_image)):
+                    raise ValueError(f"There is a Nan in the Fourier image for {it}-th iteration,{i}-th image")
+                if np.any(np.isnan(self.hr_obj_image)):
+                    raise ValueError(f"There is a Nan in the Object image for {it}-th iteration,{i}-th image")
+                
+                
+            if live_plot:
+                # Update the HR object image after all spectrum updates in this iteration
+                self.hr_obj_image = ifft2(ifftshift(self.hr_fourier_image))
+                self._update_live_plot(img_amp, img_phase, fourier_amp, loss_im, fig, it, axes)
+            if save_gif:
+                # Save the frame
+                frame_file = f"tmp/frame_{it}.png"
+                plt.savefig(frame_file)
+                frame_files.append(frame_file)
+
+            self.losses.append(self.iter_loss/self.num_images)
+            self.iters_passed += 1
+
+        if save_gif:
+            # Create the GIF using Pillow
+            frames = [Image.open(file) for file in frame_files]
+            frames[0].save(
+                "recon_gif.gif",
+                save_all=True,
+                append_images=frames[4:],
+                duration=400,  # in milliseconds
+                loop=0
+            )
+            
+            # Cleanup temporary frame files
+            for file in frame_files:
+                os.remove(file)
+                
+        self.hr_obj_image = ifft2(ifftshift(self.hr_fourier_image))
+    
+    
+    def _update_spectrum(self, image, kx_iter, ky_iter):
+        """Handles the Fourier domain update."""
+        kx_cidx = round((kx_iter - self.kx_min_n) / self.dkx)
+        kx_lidx = round(max(kx_cidx - self.omega_obj_x / (2 * self.dkx), 0))
+        kx_hidx = round(kx_cidx + self.omega_obj_x / (2 * self.dkx)) + (1 if self.nx_lr % 2 != 0 else 0)
+        
+        ky_cidx = round((ky_iter - self.ky_min_n) / self.dky)
+        ky_lidx = round(max(ky_cidx - self.omega_obj_y / (2 * self.dky), 0))
+        ky_hidx = round(ky_cidx + self.omega_obj_y / (2 * self.dky)) + (1 if self.ny_lr % 2 != 0 else 0)
+        
+        pupil_func_patch = self.pupil_func[kx_lidx:kx_hidx, ky_lidx:ky_hidx]
+        image_FT = self.hr_fourier_image * pupil_func_patch
+        
+        #image_lr = fftshift(ifft2(ifftshift(image_FT)))
+        image_lr = ifft2(ifftshift(image_FT))
+        image_lr_update = np.sqrt(image) * np.exp(1j * np.angle(image_lr))
+        image_FT_update = fftshift(fft2(image_lr_update)) 
+
+        weight_fac_pupil = self.alpha * self.compute_weight_fac(pupil_func_patch)
+        
+        # Update fourier spectrum
+        delta_lowres_ft = image_FT_update - image_FT
+        self.hr_fourier_image += delta_lowres_ft *  weight_fac_pupil
+
+        if np.any(np.isnan(self.hr_fourier_image)):
+            raise ValueError("There is a Nan value, check the configurations ")
+            
+        # Update Pupil Function 
+        weight_factor_obj = self.beta * self.compute_weight_fac(self.hr_fourier_image)
+        self.pupil_func[kx_lidx:kx_hidx, ky_lidx:ky_hidx] += weight_factor_obj * delta_lowres_ft
+
+        # Live plotting of Pupil function update
+
+        # integrate Zernike code here and Pupil function smoothness
+        pupil_patch = self.pupil_func[kx_lidx:kx_hidx, ky_lidx:ky_hidx]
+        pupil_phase = np.angle(pupil_patch)
+        # unwrap pupil phase
+
+        pupil_phase = self.zernike_proj(np.angle(pupil_patch))
+        # FIX ME- Impose smoothness constraint here for pupil amplitude
+        #pupil_amp = self.tv2(np.abs(pupil_patch))
+
+        image_lr_new = np.abs(ifft2(ifftshift(self.hr_fourier_image*self.pupil_func[kx_lidx:kx_hidx, ky_lidx:ky_hidx])))**2
+        
+        self.iter_loss+=self._compute_loss(image_lr_new, image)
+
+    def zernike_proj(self, wavefront):
+        shape_y, shape_x = wavefront.shape
+        wavefront = unwrap_phase(wavefront)
+
+        # Constructing the wavefront using Zernike 
+
+        square_poly = SquarePolynomials() 
+
+        # Create coordinate grids
+        side_x = np.linspace(-1/np.sqrt(2), 1/np.sqrt(2), shape_x)
+        side_y = np.linspace(-1/np.sqrt(2), 1/np.sqrt(2), shape_y)
+
+        X, Y = np.meshgrid(side_x, side_y)
+        xdata = [X, Y]
+
+        coeffs = extract_square_coefficients_vectorized(wavefront)
+
+        all_results = square_poly.evaluate_all(xdata, coeffs)
+        new_wavefront = sum(all_results.values())
+        return new_wavefront
+
+        # Pupil plotting in inner loop
+
+    def _initialize_pupil_plot(self):
+        """
+        Initializes the live plot with two subplots: one for amplitude and one for phase.
+        
+        Returns:
+            fig, ax: Matplotlib figure and axes.
+            pupil_img_amp, pupil_img_phase: Images of pupil amplitude and pupil phase
+        """
+    
+        # Initialize empty images
+        fig, axes = plt.subplots(1, 2, figsize=(8, 8))
+                
+        # Initialize the plots with the initial image
+        pupil_img_amp = axes[0].imshow(np.abs(self.pupil_func), cmap='viridis')
+        axes[0].set_title("Pupil Amplitude")
+        cbar_amp = plt.colorbar(pupil_img_amp, ax=axes[0])
+
+        pupil_img_phase = axes[1].imshow(np.angle(self.pupil_func), cmap='viridis')
+        axes[1].set_title("Object Phase")
+        cbar_phase = plt.colorbar(pupil_img_phase, ax=axes[1])
+        
+
+        plt.tight_layout()
+        plt.ion()  # Enable interactive mode
+        plt.show()
+    
+        return fig, axes, pupil_img_amp, pupil_img_phase
+
+    def _update_pupil_plot(self, pupil_img_amp, pupil_img_phase, fig, axes):
+        """
+        Updates the live plot with new amplitude and phase images.
+
+        Args:
+            pupil_img_phase: Matplotlib image of pupil phase.
+            pupil_img_amp: Matplotlib image of pupil amplitude.
+        """
+        amplitude_pupil = np.abs(self.pupil_func)
+        phase_pupil =  np.angle(self.pupil_func)
+        
+        pupil_img_amp.set_data(amplitude_pupil)  # Normalize for visibility
+        pupil_img_phase.set_data(phase_pupil)
+            
+        clear_output(wait=True)
+        display(fig)
+        fig.canvas.flush_events()
