@@ -258,3 +258,48 @@ def pad_to_double_parallel(image_list, n_jobs=8):
     
     )
     return padded_images
+    
+@time_it
+def pad_array_flexible(arr, target_shape, mode='constant', constant_values=0, center=True):
+    """
+    More flexible padding function using numpy.pad.
+    
+    Parameters:
+    -----------
+    arr : array_like
+        Input array
+    target_shape : tuple
+        Target shape for the padded array
+    mode : str or function, optional
+        Padding mode (see numpy.pad documentation)
+    constant_values : scalar, optional
+        Value to use for constant padding
+    center : bool, optional
+        If True, center the array; if False, pad at the end
+        
+    Returns:
+    --------
+    np.ndarray
+        Padded array
+    """
+    arr = np.asarray(arr)
+    
+    if len(arr.shape) != len(target_shape):
+        raise ValueError(f"Dimension mismatch: array has {len(arr.shape)}D, target is {len(target_shape)}D")
+    
+    pad_widths = []
+    for current, target in zip(arr.shape, target_shape):
+        if target < current:
+            raise ValueError(f"Target size {target} is smaller than current size {current}")
+        
+        pad_total = target - current
+        if center:
+            pad_before = pad_total // 2
+            pad_after = pad_total - pad_before
+        else:
+            pad_before = 0
+            pad_after = pad_total
+            
+        pad_widths.append((pad_before, pad_after))
+    
+    return np.pad(arr, pad_widths, mode=mode, constant_values=constant_values)

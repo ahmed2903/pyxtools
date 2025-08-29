@@ -20,7 +20,7 @@ class difference_map:
 
     def __init__(self, images, pupil_func: str, kout_vec, ks_pupil, 
                  lr_psize, alpha=0.1, beta=0.1, 
-                 hr_obj_image=None, hr_fourier_image=None,
+                 object_est=None, object_estFT=None,
                  num_jobs=4):
 
         '''
@@ -36,8 +36,8 @@ class difference_map:
         self.ks_pupil = ks_pupil
         self.lr_psize = lr_psize
         
-        self.hr_obj_image = hr_obj_image
-        self.hr_fourier_image = hr_fourier_image  
+        self.object_est = object_est   #has shape different from the pupil_function
+        self.object_estFT = object_estFT  
         
         self.losses = []
         self.iters_passed = 0
@@ -46,6 +46,7 @@ class difference_map:
         self.num_jobs = num_jobs
 
         self.Npupil_rows, self.Npupil_cols = self.pupil_func.shape
+        self.Ncoherent_imgs, self.Nr1, self.Nc1 = self.images.shape
 
 
     @time_it
@@ -56,7 +57,7 @@ class difference_map:
         if 'zoom_factor' in kwargs:
             self.zoom_factor = kwargs['zoom_factor']
 
-        if 'extend' in kwargs:
+        if 'extendobject_est
             extend = kwargs['extend']
         else:
             extend = None
@@ -88,18 +89,18 @@ class difference_map:
         self.images = np.array(self.images)
         
     def _initiate_recons_images(self):
-        if self.hr_obj_image is None and self.hr_fourier_image is None: 
-            self.hr_obj_image = np.ones_like(self.images[0]).astype(complex)
-            self.hr_fourier_image = np.ones_like(self.images[0]).astype(complex)
+        if self.object_est is None and self.object_estFT is None: 
+            self.object_est = np.ones_like(self.images[0]).astype(complex)
+            self.object_estFT = np.ones_like(self.images[0]).astype(complex)
         
-        elif self.hr_obj_image is not None:
-            self.hr_fourier_image = fftshift(fft2(self.hr_obj_image))
+        elif self.object_est is not None:
+            self.object_estFT = fftshift(fft2(self.object_est))
             
-        elif self.hr_fourier_image is not None:
-            self.hr_obj_image = ifft2(ifftshift(self.hr_fourier_image))
+        elif self.object_estFT is not None:
+            self.object_est = ifft2(ifftshift(self.object_estFT))
             
         self.nx_lr, self.ny_lr = self.images[0].shape
-        self.nx_hr, self.ny_hr = self.hr_obj_image.shape
+        self.nx_hr, self.ny_hr = self.object_est.shape
         
        
     def _load_pupil(self):
@@ -138,77 +139,6 @@ class difference_map:
         
         self.pupil_func = full_array
 
-
-
-    def _get_pupil_patch(self, kx_iter, ky_iter):
-        '''
-        This method get Pupil patch 
-        '''
-         
-        kx_cidx = round((kx_iter - self.kx_min_n) / self.dkx)
-        kx_lidx = round(max(kx_cidx - self.omega_obj_x / (2 * self.dkx), 0))
-        kx_hidx = round(kx_cidx + self.omega_obj_x / (2 * self.dkx)) + (1 if self.nx_lr % 2 != 0 else 0)
-        
-        ky_cidx = round((ky_iter - self.ky_min_n) / self.dky)
-        ky_lidx = round(max(ky_cidx - self.omega_obj_y / (2 * self.dky), 0))
-        ky_hidx = round(ky_cidx + self.omega_obj_y / (2 * self.dky)) + (1 if self.ny_lr % 2 != 0 else 0)
-        
-        pupil_func_patch = self.pupil_func[kx_lidx:kx_hidx, ky_lidx:ky_hidx]
-
-        return pupil_func_patch
-
-
-    def get_exitFT_centre(self, pupil, objectFT):
-        '''
-        This method initializes the exit field in Fourier domain
-        objectFT: (128, 128)
-        '''
-        
-        #this_pupil = self.get_pupil_patch(kx_iter, ky_iter)
-        
-       
-        self.Ncoherent_imgs, self.Nr1, self.Nc1 = self.images.shape
-        self.Npupil_row, self.Npupil_col= self.pupil_func.shape
-
-        # Bringing the exit patch to the centre
-        exit_FT = np.zeros_like(self.pupil_func)
-        exitFT[self.Npupil_row//2 - self.Nr1//2: self.Npupil_row//2 + self.Nr1//2, self.Npupil_col//2 - self.Nc1//2: self.Npupil_col//2 + self.Nc1//2] =  pupil * objectFT
-        self.exitFT_centre = exitFT
-        return exitFT
-
-    def difference_map_engine(self):
-        '''
-        Write description of the algorithm
-        '''
-    
-        PSI_n = np.zeros_like(self.PSI_FT).astype(complex)
-        for i, (image, kx_iter, ky_iter) in enumerate(tqdm(zip(self.up_imSeqLowRess, self.kout_vec[:, 0], self.kout_vec[:, 1]), 
-                                                               desc="Processing", total=len(self.images), unit="images")):
-            this_objectFT = self._prep_objectFT(kx_iter, ky_iter)
-            Ps_psi = self._get_exitFT(self.pupil_func, this_objectFT)
-            Rs_psi = 2*Ps_psi - self.PSI_FT[i]
-            Pm_rpsi = self.project_data(image, Rs_psi)
-            PSI_n[i] = self.PSI_FT[i] + Pm_rpsi - Ps_psi 
-        return PSI_n
-
-    def project_data(self, image, psi_FT):
-        '''
-        measurement projection
-        '''
-        psi = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(psi_FT)))
-        psi_new = image*np.exp(1j*np.angle(psi))
-        PSI_PM  =  np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(psi_new)))
-        
-        return PSI_PM
-
-    def _fft2(self, arr):
-        return np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(arr)))
-
-    def _ifft2(self, arrFT):
-        return np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(arrFT)))
-
-    
-
     def _upsample_coherent_images(self):
         Nx, Ny = self.pupil_func
         upsamp_img = np.zeros((self.Ncoherent_imgs, Nx, Ny))
@@ -222,52 +152,55 @@ class difference_map:
     
         return upsamp_img
 
-    def iterate(self, iterations, objectFT_est):
-        self.up_imSeqLowRes = self._upsample_coherent_images()   # Write this function
+        
 
-        self.objectFT_est = objectFT_est
+
+    def iterate(self, iterations ):
+        #zero_padding the object guess FT to have the same shape as of pupil_func
+        self.object_estFT_up = pad_array_flexible(self.object_estFT, target_shape = (self.Npupil_rows, self.Npupil_cols)) 
+        #upsample the coherent images to have the same shape as of pupil
+        self.up_imSeqLowRes = self._upsample_coherent_images()   
+
         for it in range(iterations):
-            objectFT_est = self._objectFT_update(objectFT_est)
-            # self.objectFT_est = objectFT_est
-            pupil = self._pupil_update()
-            # self.pupil_func = pupil
-            PSI_update = difference_map_engine( )
+            self.object_est_up = self._fft2(self.object_estFT_up)
             
-
-    def _objectFT_update(self, objectFT):
-        Nx, Ny = self.pupil_func.shape
-        denom = np.zeros_like(self.pupil_func)
-        numer = np.zeros_like(self.pupil_func)
-        for i, (image, kx_iter, ky_iter) in enumerate(tqdm(zip(self.images, self.kout_vec[:, 0], self.kout_vec[:, 1]), 
-                                                               desc="Processing", total=len(self.images), unit="images")):
-            this_pupil = self.get_pupil_patch(kx_iter, ky_iter)
-            denom += np.abs(this_pupil)**2
-            numer += this_pupil*self.get_exitFT_centre(pupil, objectFT)
-        objectFT_update = numer/(denom + 10**-15)
-        return objectFT_update
+            # update pupil
+            self.pupil_func = self._pupil_update()
+            
+            #update object FT upsampled
+            self.object_estFT_up = self._objectFT_update()
+            
+            PSI_update = difference_map_engine()
+            self.PSI_FT = PSI_update
 
 
     def _pupil_update(self):
+        '''
+        Updating the pupil function
+        '''
         denom = np.zeros_like(self.pupil_func)
         numer = np.zeros_like(self.pupil_func)
         PSI_FT = []
         object_FT = []
         for i, (image, kx_iter, ky_iter) in enumerate(tqdm(zip(self.images, self.kout_vec[:, 0], self.kout_vec[:, 1]), 
                                                                desc="Processing", total=len(self.images), unit="images")):
-            this_objectFT = self._prep_objectFT(kx_iter, ky_iter)
+            this_objectFT = self._shift_objectFT(kx_iter, ky_iter)
             denom += np.abs(this_objectFT)**2
             this_PSI = self._get_exitFT(self.pupil_func, this_objectFT)
-            numer += this_objectFT * this_PSI
+            numer += np.conjugate(this_objectFT) * this_PSI
+            
             objectFT.append(this_objectFT)
             PSI_FT.append(this_PSI)
             
-        pupil_func_update = numer/(denom+10**-15)
+        pupil_func_update = numer/(denom+10**-15)   # use self.pupil_func
         self.PSI_FT = np.array(PSI_FT)
         self.objectFT_shifted = np.array(objectFT)
         return pupil_func_update
-        
 
-    def _prep_objectFT(self, kx_iter, ky_iter):
+    def _shift_objectFT(self, kx_iter, ky_iter):
+        '''
+        This method shifts the object's FT estimate to the (kx_cidx, ky_cidx) location
+        '''
         object_patch = np.zeros_like(self.pupil_func)
         
         kx_cidx = round((kx_iter - self.kx_min_n) / self.dkx)
@@ -278,12 +211,121 @@ class difference_map:
         ky_lidx = round(max(ky_cidx - self.omega_obj_y / (2 * self.dky), 0))
         ky_hidx = round(ky_cidx + self.omega_obj_y / (2 * self.dky)) + (1 if self.ny_lr % 2 != 0 else 0)
 
-        object_patch[kx_lidx:kx_hidx, ky_lidx:ky_hidx] = self.objectFT_est
-        return object_patch
+        rl = self.Npupil_rows//2 - self.Nr1//2
+        rh = self.Npupil_rows//2 + self.Nr1//2
+        cl = self.Npupil_cols//2 - self.Nc1//2
+        ch = self.Npupil_cols//2 - self.Nc1//2
 
+        object_patch[kx_lidx:kx_hidx, ky_lidx:ky_hidx] = self.object_estFT_up[rl:rh, cl:ch]  
+        return object_patch
 
     def _get_exitFT(self, pupil, objectFT):
         return pupil*objectFT
+
+
+    ###--------
+    def _objectFT_update(self):
+        Nx, Ny = self.pupil_func.shape
+        denom = np.zeros_like(self.pupil_func)
+        numer = np.zeros_like(self.pupil_func)
+        for i, (image, kx_iter, ky_iter) in enumerate(tqdm(zip(self.images, self.kout_vec[:, 0], self.kout_vec[:, 1]), 
+                                                               desc="Processing", total=len(self.images), unit="images")):
+            this_pupil = self.get_pupil_patch_centre(kx_iter, ky_iter)
+            denom += np.abs(this_pupil)**2
+            numer += np.conjugate(this_pupil) * self.get_exitFT_centred(this_pupil) 
+        objectFT_update = numer/(denom + 10**-15)
+        return objectFT_update
+
+
+    def _get_pupil_patch_centre(self, kx_iter, ky_iter):
+        '''
+        This method get Pupil patch to the centre
+        '''
+        pupil_func_patch = np.zeros_like(self.pupil_func) 
+        
+        kx_cidx = round((kx_iter - self.kx_min_n) / self.dkx)
+        kx_lidx = round(max(kx_cidx - self.omega_obj_x / (2 * self.dkx), 0))
+        kx_hidx = round(kx_cidx + self.omega_obj_x / (2 * self.dkx)) + (1 if self.nx_lr % 2 != 0 else 0)
+        
+        ky_cidx = round((ky_iter - self.ky_min_n) / self.dky)
+        ky_lidx = round(max(ky_cidx - self.omega_obj_y / (2 * self.dky), 0))
+        ky_hidx = round(ky_cidx + self.omega_obj_y / (2 * self.dky)) + (1 if self.ny_lr % 2 != 0 else 0)
+
+        rl = self.Npupil_rows//2 - self.Nr1//2
+        rh = self.Npupil_rows//2 + self.Nr1//2
+        cl = self.Npupil_cols//2 - self.Nc1//2
+        ch = self.Npupil_cols//2 - self.Nc1//2
+
+        pupil_func_patch[rl : rh, cl:ch] = self.pupil_func[kx_lidx:kx_hidx, ky_lidx:ky_hidx]
+
+        return pupil_func_patch
+
+
+    def get_exitFT_centred(self, pupil):
+        '''
+        This method initializes the exit field in Fourier domain
+        objectFT: (128, 128)
+        '''
+        
+        #this_pupil = self.get_pupil_patch(kx_iter, ky_iter)
+        rl = self.Npupil_rows//2 - self.Nr1//2
+        rh = self.Npupil_rows//2 + self.Nr1//2
+        cl = self.Npupil_cols//2 - self.Nc1//2
+        ch = self.Npupil_cols//2 - self.Nc1//2
+        
+
+
+        # Bringing the exit patch to the centre
+        exit_FT = np.zeros_like(self.pupil_func)
+        exitFT[rl:rh, cl:ch] =  pupil * self.object_estFT_up
+        self.exitFT_centred = exitFT
+        return exitFT
+
+    def difference_map_engine(self):
+        '''
+        Write description of the algorithm
+        '''
+    
+        PSI_n = np.zeros_like(self.PSI_FT).astype(complex)
+        for i, (image, kx_iter, ky_iter) in enumerate(tqdm(zip(self.up_imSeqLowRess, self.kout_vec[:, 0], self.kout_vec[:, 1]), 
+                                                               desc="Processing", total=len(self.images), unit="images")):
+            this_objectFT = self._shift_objectFT(kx_iter, ky_iter)
+            Ps_psi = self._get_exitFT(self.pupil_func, this_objectFT)
+            Rs_psi = 2*Ps_psi - self.PSI_FT[i]
+            Pm_rpsi = self.project_data(image, Rs_psi)
+            PSI_n[i] = self.PSI_FT[i] + Pm_rpsi - Ps_psi 
+        return PSI_n
+
+    def project_data(self, image, arr_FT):
+        '''
+        measurement projection
+        '''
+        psi =  self._ifft2(arr_FT) 
+        psi_new = image*np.exp(1j*np.angle(psi))
+        PSI_PM  =  self._fft2(psi_new)  
+        return PSI_PM
+
+    def _fft2(self, arr):
+        return np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(arr)))
+
+    def _ifft2(self, arrFT):
+        return np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(arrFT)))
+
+    
+
+
+    
+            
+
+    
+
+    
+        
+
+
+
+
+    
         
         
         
