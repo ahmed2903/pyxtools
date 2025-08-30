@@ -19,8 +19,7 @@ from .utils_zernike import *
 class difference_map:
 
     def __init__(self, images, pupil_func: str, kout_vec, ks_pupil, 
-                 lr_psize, alpha=0.1, beta=0.1, 
-                 object_est=None, object_estFT=None,
+                 lr_psize, object_est=None, object_estFT=None,
                  num_jobs=4):
 
         '''
@@ -57,7 +56,7 @@ class difference_map:
         if 'zoom_factor' in kwargs:
             self.zoom_factor = kwargs['zoom_factor']
 
-        if 'extendobject_est
+        if 'extend' in kwargs:
             extend = kwargs['extend']
         else:
             extend = None
@@ -112,7 +111,7 @@ class difference_map:
         dims = round((self.kx_max_n - self.kx_min_n)/self.dkx), round((self.ky_max_n - self.ky_min_n)/self.dky)
         dims = make_dims_even(dims)
 
-        full_array = np.zeros(dims)
+        full_array = np.zeros(dims).astype(complex)
         
         if isinstance(self.pupil_func, str):
             pupil_func = np.load(self.pupil_func)
@@ -140,7 +139,7 @@ class difference_map:
         self.pupil_func = full_array
 
     def _upsample_coherent_images(self):
-        Nx, Ny = self.pupil_func
+        Nx, Ny = self.pupil_func.shape
         upsamp_img = np.zeros((self.Ncoherent_imgs, Nx, Ny))
         
         for k in range(self.Ncoherent_imgs):
@@ -148,21 +147,24 @@ class difference_map:
             image_FT = self._fft2(image)
             new_image_FT = np.zeros((Nx, Ny), dtype=complex)
             new_image_FT[Nx//2 - self.Nr1//2 : Nx//2 + self.Nr1//2, Ny//2 -self.Nc1//2: Ny//2 + self.Nc1//2] = image_FT
-            upsamp_img[k] = self._ifft2c(new_image_FT)
+            upsamp_img[k] = self._ifft2(new_image_FT)
     
         return upsamp_img
 
+    def iterate(self, iterations, live_plot = True):
+
         
-
-
-    def iterate(self, iterations ):
         #zero_padding the object guess FT to have the same shape as of pupil_func
-        self.object_estFT_up = pad_array_flexible(self.object_estFT, target_shape = (self.Npupil_rows, self.Npupil_cols)) 
+        self.object_estFT_up = pad_array_flexible(self.object_estFT, target_shape = self.pupil_func.shape) 
+        self.object_est_up = np.fft.ifft2(self.object_estFT_up)
         #upsample the coherent images to have the same shape as of pupil
         self.up_imSeqLowRes = self._upsample_coherent_images()   
 
+        if live_plot:
+            fig, axes, img_amp, img_phase, img_pupil_amp, img_pupil_phase = self._initialize_live_plot()
+
         for it in range(iterations):
-            self.object_est_up = self._fft2(self.object_estFT_up)
+            self.object_est_up = np.fft.ifft2(self.object_estFT_up)
             
             # update pupil
             self.pupil_func = self._pupil_update()
@@ -170,8 +172,11 @@ class difference_map:
             #update object FT upsampled
             self.object_estFT_up = self._objectFT_update()
             
-            PSI_update = difference_map_engine()
+            PSI_update = self.difference_map_engine()
             self.PSI_FT = PSI_update
+
+            if live_plot and it % 5 == 0:
+                self._update_live_plot(img_amp, img_phase, img_pupil_amp, img_pupil_phase, fig, axes)
 
 
     def _pupil_update(self):
@@ -181,7 +186,7 @@ class difference_map:
         denom = np.zeros_like(self.pupil_func)
         numer = np.zeros_like(self.pupil_func)
         PSI_FT = []
-        object_FT = []
+        objectFT = []
         for i, (image, kx_iter, ky_iter) in enumerate(tqdm(zip(self.images, self.kout_vec[:, 0], self.kout_vec[:, 1]), 
                                                                desc="Processing", total=len(self.images), unit="images")):
             this_objectFT = self._shift_objectFT(kx_iter, ky_iter)
@@ -214,14 +219,13 @@ class difference_map:
         rl = self.Npupil_rows//2 - self.Nr1//2
         rh = self.Npupil_rows//2 + self.Nr1//2
         cl = self.Npupil_cols//2 - self.Nc1//2
-        ch = self.Npupil_cols//2 - self.Nc1//2
+        ch = self.Npupil_cols//2 + self.Nc1//2
 
         object_patch[kx_lidx:kx_hidx, ky_lidx:ky_hidx] = self.object_estFT_up[rl:rh, cl:ch]  
         return object_patch
 
     def _get_exitFT(self, pupil, objectFT):
         return pupil*objectFT
-
 
     ###--------
     def _objectFT_update(self):
@@ -230,18 +234,18 @@ class difference_map:
         numer = np.zeros_like(self.pupil_func)
         for i, (image, kx_iter, ky_iter) in enumerate(tqdm(zip(self.images, self.kout_vec[:, 0], self.kout_vec[:, 1]), 
                                                                desc="Processing", total=len(self.images), unit="images")):
-            this_pupil = self.get_pupil_patch_centre(kx_iter, ky_iter)
+            this_pupil = self._get_pupil_patch_centred(kx_iter, ky_iter)
             denom += np.abs(this_pupil)**2
-            numer += np.conjugate(this_pupil) * self.get_exitFT_centred(this_pupil) 
+            this_PSI = self._get_exitFT(this_pupil, self.object_estFT_up)
+            numer += np.conjugate(this_pupil) * this_PSI #self.get_exitFT_centred(this_pupil) 
         objectFT_update = numer/(denom + 10**-15)
         return objectFT_update
 
-
-    def _get_pupil_patch_centre(self, kx_iter, ky_iter):
+    def _get_pupil_patch_centred(self, kx_iter, ky_iter):
         '''
         This method get Pupil patch to the centre
         '''
-        pupil_func_patch = np.zeros_like(self.pupil_func) 
+        pupil_func_patch = np.zeros_like(self.pupil_func).astype(complex) 
         
         kx_cidx = round((kx_iter - self.kx_min_n) / self.dkx)
         kx_lidx = round(max(kx_cidx - self.omega_obj_x / (2 * self.dkx), 0))
@@ -254,7 +258,7 @@ class difference_map:
         rl = self.Npupil_rows//2 - self.Nr1//2
         rh = self.Npupil_rows//2 + self.Nr1//2
         cl = self.Npupil_cols//2 - self.Nc1//2
-        ch = self.Npupil_cols//2 - self.Nc1//2
+        ch = self.Npupil_cols//2 + self.Nc1//2
 
         pupil_func_patch[rl : rh, cl:ch] = self.pupil_func[kx_lidx:kx_hidx, ky_lidx:ky_hidx]
 
@@ -266,20 +270,16 @@ class difference_map:
         This method initializes the exit field in Fourier domain
         objectFT: (128, 128)
         '''
-        
-        #this_pupil = self.get_pupil_patch(kx_iter, ky_iter)
         rl = self.Npupil_rows//2 - self.Nr1//2
         rh = self.Npupil_rows//2 + self.Nr1//2
         cl = self.Npupil_cols//2 - self.Nc1//2
-        ch = self.Npupil_cols//2 - self.Nc1//2
-        
+        ch = self.Npupil_cols//2 + self.Nc1//2
 
-
-        # Bringing the exit patch to the centre
+        # Bring the exit patch to the centre
         exit_FT = np.zeros_like(self.pupil_func)
-        exitFT[rl:rh, cl:ch] =  pupil * self.object_estFT_up
-        self.exitFT_centred = exitFT
-        return exitFT
+        exit_FT[rl:rh, cl:ch] =  pupil * self.object_estFT_up
+        self.exitFT_centred = exit_FT
+        return exit_FT
 
     def difference_map_engine(self):
         '''
@@ -287,7 +287,7 @@ class difference_map:
         '''
     
         PSI_n = np.zeros_like(self.PSI_FT).astype(complex)
-        for i, (image, kx_iter, ky_iter) in enumerate(tqdm(zip(self.up_imSeqLowRess, self.kout_vec[:, 0], self.kout_vec[:, 1]), 
+        for i, (image, kx_iter, ky_iter) in enumerate(tqdm(zip(self.up_imSeqLowRes, self.kout_vec[:, 0], self.kout_vec[:, 1]), 
                                                                desc="Processing", total=len(self.images), unit="images")):
             this_objectFT = self._shift_objectFT(kx_iter, ky_iter)
             Ps_psi = self._get_exitFT(self.pupil_func, this_objectFT)
@@ -311,8 +311,78 @@ class difference_map:
     def _ifft2(self, arrFT):
         return np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(arrFT)))
 
-    
-
+# Plotting
+    def _initialize_live_plot(self):
+        """
+        Initializes the live plot with two subplots: one for amplitude and one for phase.
+        
+        Returns:
+            fig, ax: Matplotlib figure and axes.
+            img_amp, img_phase: Image objects for real-time updates.
+        """
+        
+        # Initialize empty images
+        fig, axes = plt.subplots(2, 2, figsize=(5, 8))
+                
+        # Initialize the plots with the initial image
+        img_amp = axes[0,0].imshow( np.abs(self.object_est_up), cmap='viridis')
+        axes[0,0].set_title("Object Amplitude")
+        cbar_amp = plt.colorbar(img_amp, ax=axes[0,0])
+        
+        img_phase = axes[0,1].imshow(np.angle(self.object_est_up), cmap='viridis')
+        axes[0,1].set_title("Object Phase")
+        img_phase.set_clim(-np.pi, np.pi)
+        cbar_phase = plt.colorbar(img_phase, ax=axes[0,1])
+        
+        img_pupil_amp = axes[1,0].imshow(np.abs(self.pupil_func), cmap='viridis')
+        axes[1,0].set_title("Fourier Amplitude")
+        cbar_fourier = plt.colorbar(img_pupil_amp, ax=axes[1,0], shrink = 0.5)
+        
+        img_pupil_phase = axes[1,1].imshow(np.angle(self.pupil_func), cmap='viridis')
+        axes[1,0].set_title("pupil phase")
+        img_pupil_phase.set_clim(-np.pi, np.pi)  # Set proper phase limits
+        cbar_fourier = plt.colorbar(img_pupil_phase, ax=axes[1,1], shrink = 0.5)
+        
+        plt.tight_layout()
+        plt.ion()  # Enable interactive mode
+        plt.show()
+        
+        return fig, axes, img_amp, img_phase, img_pupil_amp, img_pupil_phase
+        
+    def _update_live_plot(self, img_amp, img_phase, img_pupil_amp, img_pupil_phase, fig, axes):
+        """
+        Updates the live plot with new amplitude and phase images.
+        
+        Args:
+            img_amp: Matplotlib image object for amplitude.
+            img_phase: Matplotlib image object for phase.
+            hr_obj_image: The complex object image to be plotted.
+        """
+        amplitude_obj = np.abs(self.object_est_up)
+        phase_obj = np.angle(self.object_est_up)
+        
+        amplitude_pupil = np.abs(self.pupil_func)
+        pupil_phi = np.angle(self.pupil_func)
+        
+        img_amp.set_data(amplitude_obj)  # Normalize for visibility
+        img_phase.set_data(phase_obj)
+        img_pupil_amp.set_data(amplitude_pupil)
+        img_pupil_phase.set_data(pupil_phi)
+        
+        
+        # amp_mean = np.mean(amplitude_obj)
+        # vmin = max(amp_mean + 2 * amp_mean, 0)
+        # vmax = amp_mean + 10 * amp_mean
+        # img_amp.set_clim(vmin, vmax)
+        
+        # ft_mean = np.mean(amplitude_ft)
+        # vmin = ft_mean + 2 * ft_mean
+        # vmax = ft_mean + 10 * ft_mean
+        # fourier_amp.set_clim(vmin, vmax)
+            
+        clear_output(wait=True)
+        display(fig)
+        fig.canvas.flush_events()
 
     
             
