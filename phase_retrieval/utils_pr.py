@@ -8,6 +8,8 @@ from time import strftime
 import functools
 import multiprocessing as mp
 from tqdm import tqdm 
+from scipy.signal import convolve2d
+
 
 def time_it(func):
     """Decorator to measure execution time of a function."""
