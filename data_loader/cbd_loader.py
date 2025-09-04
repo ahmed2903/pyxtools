@@ -849,7 +849,7 @@ class load_data:
         self.rois[roi_name].detected_objects = detect_obj_parallel(self.rois[roi_name].coherent_imgs, threshold=threshold, n_jobs=self.num_jobs)
         
         
-        mask = [np.sum(im) > min_val and np.sum(im) < max_val for im in self.images_object[roi_name]]
+        mask = [np.sum(im) > min_val and np.sum(im) < max_val for im in self.rois[roi_name].detected_objects]
         print(f'length of the mask is {np.sum(mask)}')
         
         self.rois[roi_name].detected_objects = np.array(self.rois[roi_name].detected_objects)[mask].copy()
