@@ -65,62 +65,62 @@ class generate_data:
         self.Ncol = comp_window 
         self.objectLength = comp_window * recon_psize
 
-    # def define_object(self, comp_window, recon_psize ):
-    #     '''
-    #     Importing the objects
+    def define_object(self, comp_window, recon_psize ):
+        '''
+        Importing the objects
 
-    #     Parameters--
-    #     comp_window: size of the window over which object is defined
+        Parameters--
+        comp_window: size of the window over which object is defined
 
-    #     Returns--
-    #     object
-    #     '''
-    #     # number of rows and columns
-    #     self.Nrow = comp_window
-    #     self.Ncol = comp_window
+        Returns--
+        object
+        '''
+        # number of rows and columns
+        self.Nrow = comp_window
+        self.Ncol = comp_window
         
-    #     self.objectLength = comp_window*recon_psize
-    #     self.object = get_vortex(comp_window, topo_charge = 1)
+        self.objectLength = comp_window*recon_psize
+        self.object = get_vortex(comp_window, topo_charge = 1)
 
-    # def load_object_with_aperture(self, amp_path, phase_path, comp_window ):
-    #     '''
-    #     Loading the amplitude and phases of the objects from Images
+    def load_object_with_aperture(self, amp_path, phase_path, comp_window ):
+        '''
+        Loading the amplitude and phases of the objects from Images
 
-    #     Parameters--
-    #     comp_window: size of the window over which object is defined
+        Parameters--
+        comp_window: size of the window over which object is defined
 
-    #     Returns--
-    #     object: numpy ndarray (complex-field)
-    #     with aperture
-    #     '''
-    #     # number of rows and columns
-    #     img1 = Image.open(amp_path)
-    #     img2 = Image.open(phase_path)
+        Returns--
+        object: numpy ndarray (complex-field)
+        with aperture
+        '''
+        # number of rows and columns
+        img1 = Image.open(amp_path)
+        img2 = Image.open(phase_path)
 
-    #     # number of rows and columns
-    #     self.Nrow = comp_window
-    #     self.Ncol = comp_window
+        # number of rows and columns
+        self.Nrow = comp_window
+        self.Ncol = comp_window
         
-    #     amp = 0.5 + 0.5*preprocess_image(img1, (self.Nrow, self.Ncol))
-    #     phi = preprocess_image( img2, (self.Nrow, self.Ncol) )
+        amp = 0.5 + 0.5*preprocess_image(img1, (self.Nrow, self.Ncol))
+        phi = preprocess_image( img2, (self.Nrow, self.Ncol) )
 
-    #     aperture = circ2d( pixel_size = 1,array_size=comp_window, radius=comp_window//3, center_x=0.0, center_y=0.0)
+        aperture = circ2d( pixel_size = 1,array_size=comp_window, radius=comp_window//3, center_x=0.0, center_y=0.0)
                                
-    #     self.object = amp*np.exp(1j*phi)* aperture
+        self.object = amp*np.exp(1j*phi)* aperture
 
-    # def load_object(self, amp_path, phase_path, comp_window):
+    def load_object(self, amp_path, phase_path, comp_window):
         
-    #     img1 = Image.open(amp_path)
-    #     img2 = Image.open(phase_path)
+        img1 = Image.open(amp_path)
+        img2 = Image.open(phase_path)
 
-    #     # number of rows and columns
-    #     self.Nrow = comp_window
-    #     self.Ncol = comp_window
+        # number of rows and columns
+        self.Nrow = comp_window
+        self.Ncol = comp_window
         
-    #     amp = 0.5 + 0.5*preprocess_image(img1, (self.Nrow, self.Ncol))
-    #     phi = preprocess_image( img2, (self.Nrow, self.Ncol) )
+        amp = 0.5 + 0.5*preprocess_image(img1, (self.Nrow, self.Ncol))
+        phi = preprocess_image( img2, (self.Nrow, self.Ncol) )
                                
-    #     self.object = amp*np.exp(1j*phi)
+        self.object = amp*np.exp(1j*phi)
         
 
     def define_source(self):

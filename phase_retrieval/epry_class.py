@@ -698,9 +698,9 @@ class EPRy_zern(EPRy_lr):
 
         shape_r, shape_c = pupil_arr.shape
         rl = shape_r//2 - self.Npupil_rows//2
-        rh = (shape_r//2 + self.Npupil_rows//2) + 1
+        rh = (shape_r//2 + self.Npupil_rows//2) 
         cl = shape_c//2 - self.Npupil_cols//2
-        ch = (shape_c//2 + self.Npupil_cols//2) + 1
+        ch = (shape_c//2 + self.Npupil_cols//2) 
         pupil_arr_cropped = pupil_arr[rl: rh, cl : ch]
         return pupil_arr_cropped
 
@@ -714,9 +714,9 @@ class EPRy_zern(EPRy_lr):
 
 
         rl = shape_r//2 - self.Npupil_rows//2
-        rh = (shape_r//2 + self.Npupil_rows//2) + 1
+        rh = (shape_r//2 + self.Npupil_rows//2) 
         cl = shape_c//2 - self.Npupil_cols//2
-        ch = (shape_c//2 + self.Npupil_cols//2) + 1
+        ch = (shape_c//2 + self.Npupil_cols//2) 
         
         pupil_arr = self.pupil_func
         pupil_arr [rl : rh, cl: ch] = pupil_arr_cropped 

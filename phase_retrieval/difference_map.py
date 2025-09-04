@@ -134,7 +134,7 @@ class difference_map:
         scale_y = dims[1] / pupil_func.shape[1] / factor
 
         # Scale the pupil phase array to match the required pupil dimensions
-        scaled_pupil_func = zoom(pupil_func, (scale_x, scale_y))
+        scaled_pupil_func = pupil_func #zoom(pupil_func, (scale_x, scale_y))
 
         # Calculate center indices
         N, M = dims[0]//factor, dims[1]//factor
@@ -161,25 +161,31 @@ class difference_map:
             upsamp_img[k] = np.abs(self._ifft2(new_image_FT))/ (self.Nr1**2/self.Npupil_rows_up**2) #Attention!!
     
         return upsamp_img
-        
 
-    def iterate(self, iterations, live_plot = True):
 
         
-        #zero_padding the object guess FT to have the same shape as of pupil_func
-        self.object_estFT_up = pad_array_flexible(self.object_estFT, target_shape = self.pupil_func.shape) 
-        self.object_est_up = np.fft.ifft2(self.object_estFT_up)/ (self.Nr1**2/self.Npupil_rows_up**2) #self._ifft2(self.object_estFT_up) #
+
+    def iterate(self, iterations, upsample_coherent_images=True, live_plot = True):
+
+        
         #upsample the coherent images to have the same shape as of pupil
-        self.up_imSeqLowRes = self._upsample_coherent_images()   
+        self.imSeqLowRes = self._upsample_coherent_images()   
+
+        # Initial Guess
+        phi_0 = np.random.random(self.pupil_func.shape)
+        self.object_est_up = self.imSeqLowRes[0]*np.exp(1j*0.02*phi_0)
+            
+        self.object_estFT_up = self._fft2(self.object_est_up)
+
+        self._initialize_exit()
 
         if live_plot:
             fig, axes, img_amp, img_phase, img_pupil_amp, img_pupil_phase = self._initialize_live_plot()
 
         for it in range(iterations):
             print(f"iteration {it+1}")
-
-            # Attention!!
-            self.object_est_up = np.fft.ifft2(self.object_estFT_up)/(self.Nr1**2/self.Npupil_rows_up**2) #self._ifft2(self.object_estFT_up) #
+            
+            self.object_est_up = self._ifft2(self.object_estFT_up) #
 
             #update object FT upsampled
             self.object_estFT_up = self._objectFT_update()
@@ -187,13 +193,22 @@ class difference_map:
             # update pupil
             self.pupil_func = self._pupil_update()
             
-            
-            
-            PSI_update = self.difference_map_engine()
-            self.PSI_FT = PSI_update
+            self.PSI_FT_centred = self.difference_map_engine()
 
             if live_plot and it % 5 == 0:
                 self._update_live_plot(img_amp, img_phase, img_pupil_amp, img_pupil_phase, fig, axes)
+
+    def _initialize_exit(self):
+        '''
+        exit initialization where the pupil function and the object spectrum 
+        are at the centre
+        '''
+        exit_FT_centred = []
+        for i, (kx_iter, ky_iter) in enumerate(self.kout_vec): 
+            this_pupil = self._get_pupil_patch_centred(kx_iter, ky_iter)  
+            this_PSI = self._get_exitFT(this_pupil, self.object_estFT_up)
+            exit_FT_centred.append(this_PSI)   
+        self.PSI_FT_centred = np.array(exit_FT_centred)
 
 
     def _pupil_update(self):
@@ -234,9 +249,9 @@ class difference_map:
         ky_hidx = round(ky_cidx + self.omega_obj_y / (2 * self.dky)) + (1 if self.ny_lr % 2 != 0 else 0)
 
         rl = self.Npupil_rows_up//2 - self.Nr1//2
-        rh = self.Npupil_rows_up//2 + self.Nr1//2
+        rh = self.Npupil_rows_up//2 + self.Nr1//2 
         cl = self.Npupil_cols_up//2 - self.Nc1//2
-        ch = self.Npupil_cols_up//2 + self.Nc1//2
+        ch = self.Npupil_cols_up//2 + self.Nc1//2 
 
         object_patch[kx_lidx:kx_hidx, ky_lidx:ky_hidx] = self.object_estFT_up[rl:rh, cl:ch]  
         return object_patch
@@ -302,15 +317,14 @@ class difference_map:
         '''
         Write description of the algorithm
         '''
-    
-        PSI_n = np.zeros_like(self.PSI_FT).astype(complex)
-        for i, (image, kx_iter, ky_iter) in enumerate(tqdm(zip(self.up_imSeqLowRes, self.kout_vec[:, 0], self.kout_vec[:, 1]), 
+        PSI_n = np.zeros_like(self.PSI_FT_centred).astype(complex)
+        for i, (image, kx_iter, ky_iter) in enumerate(tqdm(zip(self.imSeqLowRes, self.kout_vec[:, 0], self.kout_vec[:, 1]), 
                                                                desc="Processing", total=len(self.images), unit="images")):  #Marker
-            this_objectFT = self._shift_objectFT(kx_iter, ky_iter)
-            Ps_psi = self._get_exitFT(self.pupil_func, this_objectFT)
-            Rs_psi = 2*Ps_psi - self.PSI_FT[i]
+            this_pupil = self._get_pupil_patch_centred(kx_iter, ky_iter)
+            Ps_psi = self._get_exitFT(this_pupil, self.object_estFT_up)
+            Rs_psi = 2*Ps_psi - self.PSI_FT_centred[i]
             Pm_rpsi = self.project_data(image, Rs_psi)
-            PSI_n[i] = self.PSI_FT[i] + Pm_rpsi - Ps_psi 
+            PSI_n[i] = self.PSI_FT_centred[i] + Pm_rpsi - Ps_psi 
         return PSI_n
 
     def project_data(self, image, arr_FT):
@@ -328,7 +342,7 @@ class difference_map:
     def _ifft2(self, arrFT):
         return np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(arrFT)))
 
-# Plotting
+    # Plotting
     def _initialize_live_plot(self):
         """
         Initializes the live plot with two subplots: one for amplitude and one for phase.
@@ -421,7 +435,7 @@ class difference_map_zern(difference_map):
             print(f"iteration {it+1}")
 
             
-            self.object_est_up = np.fft.ifft2(self.object_estFT_up) / (self.Nr1**2/self.Npupil_rows_up**2) #self._ifft2(self.object_estFT_up) #
+            self.object_est_up = np.fft.ifft2(self.object_estFT_up) / (self.Nr1**2/self.Npupil_rows_up**2) 
 
             # update pupil
             if np.mod(it, 2) == 0:
