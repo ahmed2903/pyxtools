@@ -22,7 +22,7 @@ from skimage.registration import phase_cross_correlation
 from scipy.ndimage import fourier_shift, gaussian_filter, binary_dilation
 import numpy as np
 import scipy.ndimage as ndimage
-import cv2
+#import cv2
 
 import scipy
 import scipy.fft
