@@ -120,7 +120,7 @@ class load_data:
                  slow_axis:int, 
                  beamtime='new',
                  fast_axis_steps = None,
-                 num_jobs = 32):
+                 num_jobs = 64):
         
         
         self.beamtime = beamtime

@@ -394,7 +394,7 @@ def downsample_array(arr, new_shape):
     
     return downsampled
 
-def make_2dimensions_even(array_list, num_jobs):
+def make_2dimensions_even(array_list, num_jobs=-1):
     """
     Takes a list of NumPy arrays and ensures that all arrays have even dimensions.
     If either dimension is odd, the array is padded at the end to make it even.
