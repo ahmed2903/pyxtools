@@ -32,13 +32,14 @@ except:
 
 @dataclass
 class ROI:
+    
     directory : str
     scan_num: int
     
     # Needs to be passed in
     det_psize: int  
     energy: float #keV
-    
+    wavelength: float # A
     det_distance: float # microns
     step_size: float # Angstroms
     slow_axis: int  # 0 for x, 1 for y
@@ -74,12 +75,8 @@ class ROI:
         
     log_params: list = field(default_factory=list, repr = False)
     
-    
-    
     checkpoint_stack:list = field(default_factory=list, repr = False)
     
-        
-    wavelength = energy2wavelength_a(energy)
     
     # _______________ Properties ________________
     @property
@@ -292,15 +289,15 @@ class processor:
         
    
     ################### Logging ##################
+    @staticmethod
     def log_roi_params(func):
         """
         Decorator for class methods that logs function calls and parameters per ROI.
         Assumes all methods have `roi_name` as the first positional argument after `self`
         """
         @wraps(func)
-        def wrapper(self, *args, **kwargs):
+        def wrapper(*args, **kwargs):
             # Get roi_name (first arg after self)
-            
             mod_kwargs = kwargs.copy()
             
             try:
@@ -315,15 +312,17 @@ class processor:
                 "args": args[1:],  
                 "kwargs": mod_kwargs
             }
+
             roi.log_params.append(entry)
         
-            return func(self, *args, **kwargs)
+            return func(*args, **kwargs)
     
         return wrapper
     
     ################### Loading data ###################
+    @time_it
     @staticmethod
-    def make_4d_dataset(roi: ROI, num_jobs = -1):
+    def make_4d_dataset(roi: ROI, num_jobs = 64):
         
         """Creates a 4D dataset from a region of interest (ROI) on the detector.
 
@@ -336,20 +335,22 @@ class processor:
         Returns:
             The 4D dataset for the given ROI.
         """
+        
         if roi.beamtime == 'old':
             # Just for naming
-            dir = f"{roi.directory.rstrip('/')}/Scan_{roi.scan_num}_data_000001.h5"
+            direc = f"{roi.directory.rstrip('/')}/Scan_{roi.scan_num}/Scan_{roi.scan_num}_data_000001.h5"
             if roi.fast_axis_steps is None:
                 raise ValueError("fast_axis_steps is required")            
             
-            data_4d = stack_4d_data_old(dir, 
+            data_4d = stack_4d_data_old(direc, 
                                         roi.coords, 
                                         roi.fast_axis_steps, 
                                         roi.slow_axis)
             
         else:
-            fnames = list_datafiles(roi.directory)[:-2]       
-            data_4d = stack_4d_data(roi.directory, 
+            direc = f"{roi.directory.rstrip('/')}/Scan_{roi.scan_num}/"
+            fnames = list_datafiles(direc)[:-2]       
+            data_4d = stack_4d_data(direc, 
                                                         fnames, 
                                                         roi.coords, 
                                                         slow_axis = roi.slow_axis, 
@@ -362,103 +363,6 @@ class processor:
         
 
      ################### Plotting ###################
-     
-    @staticmethod
-    def plot_detector_roi(roi:ROI, file_no, frame_no, title=None, vmin=None, vmax=None,mask_hot = False, save=False):
-        """Plots a region of interest (ROI) on the detector for a given frame.
-
-        This method retrieves a specific ROI from the detector data and visualizes it.
-        It supports optional hot pixel masking and saving of the generated plot.
-    
-        Args:
-            roi_name (str): The name of the region of interest (ROI) to be plotted.
-            file_no (int): The file number to retrieve the frame from.
-            frame_no (int): The frame number within the specified file.
-            title (str, optional): The title of the plot. Defaults to an auto-generated title.
-            vmin (float, optional): Minimum intensity value for visualization. Defaults to None.
-            vmax (float, optional): Maximum intensity value for visualization. Defaults to None.
-            mask_hot (bool, optional): Whether to apply hot pixel masking. Defaults to False.
-            save (bool, optional): Whether to save the plotted image. Defaults to False.
-    
-        Raises:
-            KeyError: If the specified ROI name is not found in `self.rois_dict`.
-    
-        Displays:
-            A plot of the selected ROI on the detector.
-        """
-        
-        if roi.beamtime == 'new':
-            file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
-            
-            file_name = roi.directory+f'Scan_{roi.scan_num}_data_{file_no_st}.h5'
-    
-            with h5py.File(file_name,'r') as f:
-                data_test = f['/entry/data/data'][frame_no,:,:]
-        else:
-            data_test = stack_4d_data_old(roi.directory, roi.coords, roi.fast_axis_steps, roi.slow_axis)[file_no,frame_no, :,:]
-
-        if mask_hot:
-
-            data_test = mask_hot_pixels(data_test)
-        if title is None:
-            title = f"Detector image in Frame ({file_no}, {frame_no})"
-        plot_roi_from_numpy(data_test, roi.coords, title, vmin=vmin, vmax=vmax, save = save)
-    
-    
-    @staticmethod
-    def plot_full_detector(roi:ROI, file_no, frame_no, 
-                          
-                          vmin1=None, vmax1=None, 
-                          vmin2=None, vmax2=None):
-        
-        """Plots a full frame of the detector.
-
-        This method retrieves and visualizes a single frame from the detector, 
-        displaying both the raw and log-transformed versions of the data.
-    
-        Args:
-            file_no (int): The file number to retrieve the frame from.
-            frame_no (int): The frame number within the specified file.
-            vmin1 (float, optional): Minimum intensity value for raw data visualization. Defaults to None.
-            vmax1 (float, optional): Maximum intensity value for raw data visualization. Defaults to None.
-            vmin2 (float, optional): Minimum intensity value for log-transformed visualization. Defaults to None.
-            vmax2 (float, optional): Maximum intensity value for log-transformed visualization. Defaults to None.
-    
-        Raises:
-            KeyError: If the required dataset is not found in the HDF5 file.
-    
-        Displays:
-            A matplotlib figure with two subplots:
-            - Left: Raw intensity data.
-            - Right: Log-transformed intensity data.
-        """
-        if roi.beamtime == 'new':
-            file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
-            
-            file_name = roi.directory+f'Scan_{roi.scan_num}_data_{file_no_st}.h5'
-    
-            with h5py.File(file_name,'r') as f:
-                data_test = f['/entry/data/data'][frame_no,:,:]
-        else:
-            data_test = stack_4d_data_old(roi.directory, [0,-1,0,-1], roi.fast_axis_steps, roi.slow_axis)[file_no,frame_no, :,:]
-
-        data_test = mask_hot_pixels(data_test)
-        fig, axes = plt.subplots(1, 2, figsize=(10,5))
-
-        log_data = np.log1p(data_test)
-
-        intensity = axes[0].imshow(data_test, cmap='jet',  vmin = vmin1, vmax = vmax1)
-        axes[0].set_title(f'Full Detector')
-        axes[0].axis('on')  
-        plt.colorbar(intensity, ax=axes[0], fraction=0.046, pad=0.04)
-        log_intensity = axes[1].imshow(log_data, cmap='jet',  vmin=vmin2, vmax=vmax2)
-        axes[1].set_title(f'Log Scale')
-        axes[1].axis('on')
-        plt.colorbar(log_intensity, ax=axes[1], fraction=0.046, pad=0.04)
-        
-        plt.tight_layout()
-        plt.show()
-        
 
 
     def plot_average_full_detector(self, beamtime='new', fast_axis_steps=None, slow_axis = 0, directory=None, vmin1=None, vmax1=None, 
@@ -484,7 +388,7 @@ class processor:
 
         if self.averaged_full_det_data is None:
             if beamtime == 'new':
-    
+            
                 f0_name = directory+self.fnames[0]
                 with h5py.File(f0_name,'r') as f:
                     data_avg = np.mean(f['/entry/data/data'][:,:,:], axis = 0)
@@ -693,7 +597,7 @@ class processor:
     
     @log_roi_params
     @staticmethod
-    def make_kouts(roi:ROI, mask_val):
+    def make_kouts( roi:ROI, mask_val):
         """Computes the k-space vectors for a given region of interest (ROI).
 
         This method calculates the pixel coordinates and k-space vectors for a specified 
@@ -710,8 +614,10 @@ class processor:
         """
         roi.kout_coords = make_coordinates(roi.averaged_det_images, 
                                                                 mask_val, 
-                                                                roi.roi_coords, 
+                                                                roi.coords, 
                                                                 crop=False)
+        if roi.centre_pixel is None:
+            roi.centre_pixel = np.array([(roi.kout_coords[:,1].max() + roi.kout_coords[:,1].min() )/2, (roi.kout_coords[:,0].max() + roi.kout_coords[:,0].min() )/2])
         
         roi.kouts = compute_vectors(roi.kout_coords, 
                                                 roi.det_distance, 
@@ -777,26 +683,28 @@ class processor:
         """
 
         if est_ttheta == 0:
+            
             roi.kins = roi.kouts
             roi.kin_coords = roi.kout_coords
             roi.kins_avg = np.mean(roi.kouts, axis = 0, keepdims = True )
+             
 
-            return 
+        else:
         
+            roi.g_init = calc_qvec(roi.kouts, roi.kins_avg)
         
-        roi.g_init = calc_qvec(roi.kouts, 
-                                          roi.kins_avg)
+            roi.kins, roi.optimal_angles = optimise_kin(roi.g_init, 
+                                                                              est_ttheta, 
+                                                                              roi.kouts, 
+                                                                              roi.wavelength, 
+                                                                              method, gtol)
+            
+            roi.kin_coords = reverse_kins_to_pixels(roi.kins, 
+                                                               roi.det_psize, 
+                                                               roi.det_distance, 
+                                                               roi.centre_pixel)
 
-        roi.kins, roi.optimal_angles = optimise_kin(roi.g_init, 
-                                                                          est_ttheta, 
-                                                                          roi.kouts, 
-                                                                          roi.wavelength, 
-                                                                          method, gtol)
-        
-        roi.kin_coords = reverse_kins_to_pixels(roi.kins, 
-                                                           roi.det_psize, 
-                                                           roi.det_distance, 
-                                                           roi.centre_pixel)
+    
         
     @log_roi_params
     @staticmethod
@@ -1205,6 +1113,103 @@ class processor:
    
 
 class plotter:
+    @staticmethod
+    def plot_detector_roi(roi:ROI, file_no, frame_no, title=None, vmin=None, vmax=None,mask_hot = True, save=False):
+        """Plots a region of interest (ROI) on the detector for a given frame.
+
+        This method retrieves a specific ROI from the detector data and visualizes it.
+        It supports optional hot pixel masking and saving of the generated plot.
+    
+        Args:
+            roi_name (str): The name of the region of interest (ROI) to be plotted.
+            file_no (int): The file number to retrieve the frame from.
+            frame_no (int): The frame number within the specified file.
+            title (str, optional): The title of the plot. Defaults to an auto-generated title.
+            vmin (float, optional): Minimum intensity value for visualization. Defaults to None.
+            vmax (float, optional): Maximum intensity value for visualization. Defaults to None.
+            mask_hot (bool, optional): Whether to apply hot pixel masking. Defaults to False.
+            save (bool, optional): Whether to save the plotted image. Defaults to False.
+    
+        Raises:
+            KeyError: If the specified ROI name is not found in `self.rois_dict`.
+    
+        Displays:
+            A plot of the selected ROI on the detector.
+        """
+        direc = f"{roi.directory.rstrip('/')}/Scan_{roi.scan_num}/"
+        
+        if roi.beamtime == 'new':
+            file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
+            
+            file_name = direc+f'Scan_{roi.scan_num}_data_{file_no_st}.h5'
+    
+            with h5py.File(file_name,'r') as f:
+                data_test = f['/entry/data/data'][frame_no,:,:]
+        else:
+            
+            data_test = stack_4d_data_old(direc, roi.coords, roi.fast_axis_steps, roi.slow_axis)[file_no,frame_no, :,:]
+
+        if mask_hot:
+            data_test = mask_hot_pixels(data_test)
+        if title is None:
+            title = f"Detector image in Frame ({file_no}, {frame_no})"
+        plot_roi_from_numpy(data_test, roi.coords, title, vmin=vmin, vmax=vmax, save = save)
+    
+    
+    @staticmethod
+    def plot_full_detector(roi:ROI, file_no, frame_no, 
+                          vmin1=None, vmax1=None, 
+                          vmin2=None, vmax2=None):
+        
+        """Plots a full frame of the detector.
+
+        This method retrieves and visualizes a single frame from the detector, 
+        displaying both the raw and log-transformed versions of the data.
+    
+        Args:
+            file_no (int): The file number to retrieve the frame from.
+            frame_no (int): The frame number within the specified file.
+            vmin1 (float, optional): Minimum intensity value for raw data visualization. Defaults to None.
+            vmax1 (float, optional): Maximum intensity value for raw data visualization. Defaults to None.
+            vmin2 (float, optional): Minimum intensity value for log-transformed visualization. Defaults to None.
+            vmax2 (float, optional): Maximum intensity value for log-transformed visualization. Defaults to None.
+    
+        Raises:
+            KeyError: If the required dataset is not found in the HDF5 file.
+    
+        Displays:
+            A matplotlib figure with two subplots:
+            - Left: Raw intensity data.
+            - Right: Log-transformed intensity data.
+        """
+        direc = f"{roi.directory.rstrip('/')}/Scan_{roi.scan_num}/"
+        if roi.beamtime == 'new':
+            file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
+            
+            file_name = direc+f'Scan_{roi.scan_num}_data_{file_no_st}.h5'
+    
+            with h5py.File(file_name,'r') as f:
+                data_test = f['/entry/data/data'][frame_no,:,:]
+        else:
+            data_test = stack_4d_data_old(direc, [0,-1,0,-1], roi.fast_axis_steps, roi.slow_axis)[file_no,frame_no, :,:]
+
+        data_test = mask_hot_pixels(data_test)
+        fig, axes = plt.subplots(1, 2, figsize=(10,5))
+
+        log_data = np.log1p(data_test)
+
+        intensity = axes[0].imshow(data_test, cmap='jet',  vmin = vmin1, vmax = vmax1)
+        axes[0].set_title(f'Full Detector')
+        axes[0].axis('on')  
+        plt.colorbar(intensity, ax=axes[0], fraction=0.046, pad=0.04)
+        log_intensity = axes[1].imshow(log_data, cmap='jet',  vmin=vmin2, vmax=vmax2)
+        axes[1].set_title(f'Log Scale')
+        axes[1].axis('on')
+        plt.colorbar(log_intensity, ax=axes[1], fraction=0.046, pad=0.04)
+        
+        plt.tight_layout()
+        plt.show()
+        
     @staticmethod
     def plot_4d_dataset(roi : ROI, vmin1 = None, vmax1 = None,vmin2 = None, vmax2 = None):
         """Plots the 4D dataset for a specified region of interest (ROI).
