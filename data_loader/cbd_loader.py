@@ -1447,12 +1447,15 @@ class load_data:
             process_params.attrs['roi'] = json.dumps(self.rois[roi_name].roi_coords)
             
             for key, value in self.exp_params.items():
-                exp_params.attrs[key] = value  # Store each parameter as an attribute
-
+                if key == 'centre_pixel':
+                    exp_params.attrs[key] = json.dumps(value.tolist())
+                    continue
+                exp_params.attrs[key] = json.dumps(value)  # Store each parameter as an attribute
+            
             for key, value in self.lens_params.items():
                 exp_params.attrs[key] = json.dumps(value)
                 
-            for func in self.roi[roi_name].log_params:
+            for func in self.rois[roi_name].log_params:
                 # self.log_roi_params[roi_name] is a list, each element correponds to a function 
                 # func is then a dictionary
                 # func["functions"] will be the function name
@@ -1463,23 +1466,6 @@ class load_data:
 
             images = h5f.create_group("processed_images")
             images.create_dataset("coherent_images", data=self.rois[roi_name].coherent_imgs, compression="gzip",chunks=True)
-            try:
-                images.create_dataset("average_coherent_images", 
-                                      data=self.rois[roi_name].averaged_coherent_images, compression="gzip")
-                images.create_dataset("averaged_detector_roi", 
-                                      data=self.rois[roi_name].averaged_det_images, compression="gzip")
-            except:
-                self.average_frames_roi(roi_name)
-                images.create_dataset("average_coherent_images", 
-                                      data=self.rois[roi_name].averaged_coherent_images, compression="gzip")
-                images.create_dataset("averaged_detector_roi", 
-                                      data=self.rois[roi_name].averaged_det_images, compression="gzip")
-        
-            try:
-                images.create_dataset("averaged_full_detector", 
-                                      data=self.averaged_full_det_data, compression="gzip")
-            except:
-                print("No averaged full detector to save")
                 
             kvectors = h5f.create_group("kvectors")
             kvectors.create_dataset("kins", data=self.rois[roi_name].kins, compression="gzip")
@@ -1487,15 +1473,17 @@ class load_data:
             kvectors.create_dataset("kin_coords", data=self.rois[roi_name].kin_coords, compression="gzip")
             kvectors.create_dataset("kout_coords", data = self.rois[roi_name].kout_coords, compression='gzip')
 
-            try:
-                kvectors.create_dataset("pupil_kins", data = self.rois['pupil'].kins, compression="gzip")
-            except:
-                print("Pupil kins were not saved")
+            if roi_name != 'pupil':
+                try:
+                    kvectors.create_dataset("pupil_kins", data = self.rois['pupil'].kins, compression="gzip")
+                except:
+                    print("Pupil kins were not saved")
                 
             print(f"Data saved at {file_path}")
     
-    @time_it     
-    def load_roi_data(self, roi_name, file_path):
+
+    @classmethod
+    def load_roi_data(cls, roi_name, file_path):
         """
         Load processed data and metadata for a specific ROI from an HDF5 file.
     
@@ -1503,61 +1491,64 @@ class load_data:
             roi_name (str): The ROI name for which the data should be loaded.
             file_path (str): Path to the HDF5 file containing saved data.
         """
+        self = cls.__new__(cls)
+        
         with h5py.File(file_path, "r") as h5f:
             # Load Experimental Parameters
             exp_params = h5f["experimental_params"]
             
             self.exp_params = {}
+            self.rois = {}
             for key, val in exp_params.attrs.items():
                 # Try to decode JSON, fallback to raw value
                 try:
                     decoded = json.loads(val)
                     self.exp_params[key] = decoded
+                    
                 except (TypeError, json.JSONDecodeError):
                     self.exp_params[key] = val
-                finally:
-                    print(f"Something wrong with this key: {key}")
-    
-            # Split lens_params if stored within exp_params
-            self.lens_params = {}
-            for key, val in self.exp_params.items():
-                if isinstance(val, dict) and all(k in val for k in ("focal_length", "height", "lens_na")):
-                    self.lens_params[key] = val
+
+                    
+            # # Split lens_params if stored within exp_params
+            # self.lens_params = {}
+            # for key, val in self.exp_params.items():
+            #     if isinstance(val, dict) and all(k in val for k in ("focal_length", "height", "lens_na")):
+            #         self.lens_params[key] = val
     
             # Load roi_coords
             params = h5f['prcoessing_params']
-            for key, val in params.attrs.items():
-                # Try to decode JSON, fallback to raw value
-                try:
-                    decoded = json.loads(val)
-                    params[key] = decoded
-                except (TypeError, json.JSONDecodeError):
-                    params[key] = val
-                finally:
-                    print(f"Something wrong with this key: {key}")
             
-            self.rois[roi_name] = ROI(params['roi_coords'])
+            print(params.attrs.keys())
+            
+            # for key, val in params.attrs.items():
+            #     # Try to decode JSON, fallback to raw value
+            #     try:
+            #         decoded = json.loads(val)
+            #         params[key] = decoded
+            #     except (TypeError, json.JSONDecodeError):
+            #         params[key] = val
+            #     finally:
+            #         print(f"Something wrong with this key: {key}")
+            
+            self.rois[roi_name] = ROI(params.attrs['roi'])
                     
             # Load Processed Images 
             images = h5f["processed_images"]
-            if not hasattr(self, 'coherent_imgs'):
-                self.coherent_imgs = {}
+            
             self.rois[roi_name].coherent_imgs = images["coherent_images"][...]
-            self.rois[roi_name].averaged_coherent_images = images["average_coherent_images"][...]
-            self.rois[roi_name].averaged_det_images = images["averaged_detector_roi"][...]
             # Load K-Vectors 
             kvectors = h5f["kvectors"]
-            for attr in ["kins", "kouts", "kin_coords", "kout_coords"]:
-                if not hasattr(self, attr):
-                    setattr(self, attr, {})
-                getattr(self, attr)[roi_name] = kvectors[attr][...]
-    
+            
+            self.rois[roi_name].kins = kvectors['kins'][...]
+            self.rois[roi_name].kouts = kvectors['kouts'][...]
+            self.rois[roi_name].kin_coords = kvectors['kin_coords'][...]
+            self.rois[roi_name].kout_coords = kvectors['kout_coords'][...]
+            
             # try loading pupil_kins
-            if "pupil_kins" in kvectors:
-                if not hasattr(self, "kins"):
-                    self.kins = {}
-                self.kins["pupil"] = kvectors["pupil_kins"][...]
-    
+            if "pupil_kins" in kvectors and roi_name != 'pupil':
+
+                self.rois['pupil'].kins = kvectors["pupil_kins"][...]
+        return self
     @time_it
     def save_roi_ptychograph(self, roi_name, file_path):
     
