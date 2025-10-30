@@ -11,7 +11,7 @@ import copy
 from tqdm.notebook import tqdm
 from functools import wraps
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Optional
 
 from matplotlib.patches import Rectangle
@@ -31,24 +31,35 @@ except:
     
 
 @dataclass
-class ROI:
-    
+class Exp:
     directory : str
     scan_num: int
     
     # Needs to be passed in
     det_psize: int  
     energy: float #keV
-    wavelength: float # A
+    
     det_distance: float # microns
     step_size: float # Angstroms
     slow_axis: int  # 0 for x, 1 for y
     fast_axis_steps: int # steps
     
-    beamtime:str # new or old
+    beamtime: str # new or old
+
+    wavelength: float = field(init=False)
+    
+    def __post_init__(self):
+
+        self.wavelength = energy2wavelength_a(self.energy)
+        # wavelength: float # A
+    
+@dataclass
+class ROI:
+
+    exp: Exp 
+    coords: np.ndarray = field(default=None, repr=False)
     
     # acquired later
-    coords: np.ndarray = field(default=None, repr=False)
     data_4d: np.ndarray = field(default=None, repr=False) # 4D Data set (x, y, fx, fy)
     centre_pixel: np.ndarray = field(default=None, repr=False)
     
@@ -77,7 +88,13 @@ class ROI:
     
     checkpoint_stack:list = field(default_factory=list, repr = False)
     
-    
+    # _______________ functionality with Exp ___________
+
+    def __post_init__(self):
+        # Copy attributes from Exp into ROI
+        for f in fields(self.exp):
+            setattr(self, f.name, getattr(self.exp, f.name))
+        
     # _______________ Properties ________________
     @property
     def averaged_det_images(self):
