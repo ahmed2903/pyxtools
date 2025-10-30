@@ -12,7 +12,9 @@ from tqdm.notebook import tqdm
 from functools import wraps
 import json
 from dataclasses import dataclass, field, fields
-from typing import Optional
+from pathlib import Path
+
+import os 
 
 from matplotlib.patches import Rectangle
 
@@ -52,7 +54,12 @@ class Exp:
 
         self.wavelength = energy2wavelength_a(self.energy)
         # wavelength: float # A
-    
+
+        base_path = Path(self.directory)
+        new_dir = f"Scan_{self.scan_num}"
+
+        self.directory = os.path.join(base_path, new_dir)
+
 @dataclass
 class ROI:
 
@@ -87,13 +94,15 @@ class ROI:
     log_params: list = field(default_factory=list, repr = False)
     
     checkpoint_stack:list = field(default_factory=list, repr = False)
-    
+
+
     # _______________ functionality with Exp ___________
 
     def __post_init__(self):
         # Copy attributes from Exp into ROI
         for f in fields(self.exp):
             setattr(self, f.name, getattr(self.exp, f.name))
+
         
     # _______________ Properties ________________
     @property
@@ -355,7 +364,7 @@ class processor:
         
         if roi.beamtime == 'old':
             # Just for naming
-            direc = f"{roi.directory.rstrip('/')}/Scan_{roi.scan_num}/Scan_{roi.scan_num}_data_000001.h5"
+            direc = os.path.join(roi.directory , "Scan_{roi.scan_num}_data_000001.h5")
             if roi.fast_axis_steps is None:
                 raise ValueError("fast_axis_steps is required")            
             
@@ -365,7 +374,7 @@ class processor:
                                         roi.slow_axis)
             
         else:
-            direc = f"{roi.directory.rstrip('/')}/Scan_{roi.scan_num}/"
+            direc = roi.directory
             fnames = list_datafiles(direc)[:-2]       
             data_4d = stack_4d_data(direc, 
                                                         fnames, 
@@ -382,61 +391,7 @@ class processor:
      ################### Plotting ###################
 
 
-    def plot_average_full_detector(self, beamtime='new', fast_axis_steps=None, slow_axis = 0, directory=None, vmin1=None, vmax1=None, 
-                                        vmin2=None, vmax2=None):
-        """
-        Plots the averaged full detector data in both linear and logarithmic scales.
 
-        If the averaged full detector data is not already computed, it is calculated
-        by averaging over all data files in `self.fnames`, depending on the beamtime mode.
-        Hot pixels are masked from the final averaged data.
-
-        Args:
-            vmin1 (float, optional): Minimum value for the linear scale color map. Defaults to None.
-            vmax1 (float, optional): Maximum value for the linear scale color map. Defaults to None.
-            vmin2 (float, optional): Minimum value for the logarithmic scale color map. Defaults to None.
-            vmax2 (float, optional): Maximum value for the logarithmic scale color map. Defaults to None.
-
-        Displays:
-            A matplotlib figure with two subplots: 
-                - Left: Averaged detector data with linear intensity scale.
-                - Right: Logarithmically scaled intensity plot.
-        """
-
-        if self.averaged_full_det_data is None:
-            if beamtime == 'new':
-            
-                f0_name = directory+self.fnames[0]
-                with h5py.File(f0_name,'r') as f:
-                    data_avg = np.mean(f['/entry/data/data'][:,:,:], axis = 0)
-                    
-                for fname in tqdm(self.fnames[1:]):
-                    file_name = directory+fname
-            
-                    with h5py.File(file_name,'r') as f:
-                        data_avg += np.mean(f['/entry/data/data'][:,:,:], axis = 0)
-            else:
-                data_avg = np.mean(stack_4d_data_old(directory, [0,-1,0,-1], 
-                                                     fast_axis_steps, slow_axis), axis = (0,1))
-    
-            self.averaged_full_det_data = data_avg
-            self.averaged_full_det_data = mask_hot_pixels(self.averaged_full_det_data)
-            
-        fig, axes = plt.subplots(1, 2, figsize=(10,5))
-
-        log_data = np.log1p(self.averaged_full_det_data)
-
-        intensity = axes[0].imshow(self.averaged_full_det_data, cmap='jet',  vmin = vmin1, vmax = vmax1)
-        axes[0].set_title(f'Full Detector - Average')
-        axes[0].axis('on')  
-        plt.colorbar(intensity, ax=axes[0], fraction=0.046, pad=0.04)
-        log_intensity = axes[1].imshow(log_data, cmap='jet',  vmin=vmin2, vmax=vmax2)
-        axes[1].set_title(f'Log Scale')
-        axes[1].axis('on')
-        plt.colorbar(log_intensity, ax=axes[1], fraction=0.046, pad=0.04)
-
-        plt.tight_layout()
-        plt.show()
         
     @staticmethod
     def estimate_pupil_size(pupil_roi:ROI, mask_val):
@@ -509,7 +464,7 @@ class processor:
 
     @log_roi_params
     @staticmethod
-    def pool_detector_space(roi:ROI, kernel_size, stride=1, padding=0):
+    def pool_detector_space(roi:ROI, kernel_size, padding=0):
         """Performs pooling on the detector space for a given region of interest (ROI).
 
         This method applies a 2D sum pooling operation on the ptychograph data of a 
@@ -532,15 +487,17 @@ class processor:
         print("Pooling detector ...")
         roi.data_4d = sum_pool2d_array(roi.data_4d, 
                                                        kernel_size=kernel_size,
-                                                       stride=stride,
-                                                       padding=padding)
+                                                       stride=None,
+                                                       padding=0)
+                
         
-        if stride is None:
-            roi.det_psize *= kernel_size
-            
-        else:
-            roi.det_psize *= stride
-            
+        roi.det_psize *= kernel_size
+
+        if roi.kout_coords is not None:
+            roi.kout_coords = np.unique(roi.kout_coords // kernel_size)
+        
+        roi.coords = np.array(roi.coords) // kernel_size
+        
         print("Done.")
 
         
@@ -871,6 +828,7 @@ class processor:
         """
         
         coherent_imgs = []
+        
         for i, coord in enumerate(roi.kout_coords):
             
             
@@ -1153,12 +1111,12 @@ class plotter:
         Displays:
             A plot of the selected ROI on the detector.
         """
-        direc = f"{roi.directory.rstrip('/')}/Scan_{roi.scan_num}/"
+        direc = roi.directory
         
         if roi.beamtime == 'new':
             file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
             
-            file_name = direc+f'Scan_{roi.scan_num}_data_{file_no_st}.h5'
+            file_name = os.path.join(direc,f'Scan_{roi.scan_num}_data_{file_no_st}.h5')
     
             with h5py.File(file_name,'r') as f:
                 data_test = f['/entry/data/data'][frame_no,:,:]
@@ -1199,11 +1157,11 @@ class plotter:
             - Left: Raw intensity data.
             - Right: Log-transformed intensity data.
         """
-        direc = f"{roi.directory.rstrip('/')}/Scan_{roi.scan_num}/"
+        direc = roi.directory
         if roi.beamtime == 'new':
             file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
             
-            file_name = direc+f'Scan_{roi.scan_num}_data_{file_no_st}.h5'
+            file_name = os.path.join(direc , f'Scan_{roi.scan_num}_data_{file_no_st}.h5')
     
             with h5py.File(file_name,'r') as f:
                 data_test = f['/entry/data/data'][frame_no,:,:]
@@ -1585,7 +1543,61 @@ class plotter:
         plot_map_on_detector(roi.averaged_det_images, roi.kout_coords, 
                              vmin, vmax, title, cmap, crop=False,roi= roi.coords)
     
-   
+    # def plot_average_full_detector(self, beamtime='new', fast_axis_steps=None, slow_axis = 0, directory=None, vmin1=None, vmax1=None, 
+    #                                     vmin2=None, vmax2=None):
+    #     """
+    #     Plots the averaged full detector data in both linear and logarithmic scales.
+
+    #     If the averaged full detector data is not already computed, it is calculated
+    #     by averaging over all data files in `self.fnames`, depending on the beamtime mode.
+    #     Hot pixels are masked from the final averaged data.
+
+    #     Args:
+    #         vmin1 (float, optional): Minimum value for the linear scale color map. Defaults to None.
+    #         vmax1 (float, optional): Maximum value for the linear scale color map. Defaults to None.
+    #         vmin2 (float, optional): Minimum value for the logarithmic scale color map. Defaults to None.
+    #         vmax2 (float, optional): Maximum value for the logarithmic scale color map. Defaults to None.
+
+    #     Displays:
+    #         A matplotlib figure with two subplots: 
+    #             - Left: Averaged detector data with linear intensity scale.
+    #             - Right: Logarithmically scaled intensity plot.
+    #     """
+
+    #     if self.averaged_full_det_data is None:
+    #         if beamtime == 'new':
+            
+    #             f0_name = os.path.join(directory,self.fnames[0])
+    #             with h5py.File(f0_name,'r') as f:
+    #                 data_avg = np.mean(f['/entry/data/data'][:,:,:], axis = 0)
+                    
+    #             for fname in tqdm(self.fnames[1:]):
+    #                 file_name = os.path.join(directory,fname)
+            
+    #                 with h5py.File(file_name,'r') as f:
+    #                     data_avg += np.mean(f['/entry/data/data'][:,:,:], axis = 0)
+    #         else:
+    #             data_avg = np.mean(stack_4d_data_old(directory, [0,-1,0,-1], 
+    #                                                  fast_axis_steps, slow_axis), axis = (0,1))
+    
+    #         self.averaged_full_det_data = data_avg
+    #         self.averaged_full_det_data = mask_hot_pixels(self.averaged_full_det_data)
+            
+    #     fig, axes = plt.subplots(1, 2, figsize=(10,5))
+
+    #     log_data = np.log1p(self.averaged_full_det_data)
+
+    #     intensity = axes[0].imshow(self.averaged_full_det_data, cmap='jet',  vmin = vmin1, vmax = vmax1)
+    #     axes[0].set_title(f'Full Detector - Average')
+    #     axes[0].axis('on')  
+    #     plt.colorbar(intensity, ax=axes[0], fraction=0.046, pad=0.04)
+    #     log_intensity = axes[1].imshow(log_data, cmap='jet',  vmin=vmin2, vmax=vmax2)
+    #     axes[1].set_title(f'Log Scale')
+    #     axes[1].axis('on')
+    #     plt.colorbar(log_intensity, ax=axes[1], fraction=0.046, pad=0.04)
+
+    #     plt.tight_layout()
+    #     plt.show()
     
         
     # ################### Prepares the data ###################

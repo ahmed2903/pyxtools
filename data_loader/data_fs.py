@@ -35,7 +35,7 @@ def load_hdf_roi(args):
     loads the data from a h5 file into a numpy array for a region of interest
     """
     data_folder, f_name, roi = args
-    file_path = data_folder + "/" + f_name
+    file_path = os.path.join(data_folder, f_name)
     
     with h5py.File(file_path,'r') as f:
         
@@ -48,7 +48,7 @@ def load_hdf(data_folder, f_name):
     loads the data from a h5 file into a numpy array for a region of interest
     """
     
-    file_path = data_folder + "/" + f_name
+    file_path = os.path.join(data_folder, f_name)
     
     with h5py.File(file_path,'r') as f:
         
@@ -394,7 +394,7 @@ def downsample_array(arr, new_shape):
     
     return downsampled
 
-def make_2dimensions_even(array_list, num_jobs=-1):
+def make_2dimensions_even(array_list, mode='constant', num_jobs=-1, **kwargs):
     """
     Takes a list of NumPy arrays and ensures that all arrays have even dimensions.
     If either dimension is odd, the array is padded at the end to make it even.
@@ -419,7 +419,7 @@ def make_2dimensions_even(array_list, num_jobs=-1):
     padding = ((0,target_shape[0] - ref_shp[0]), (0,target_shape[1] - ref_shp[1]))
     
     def process_array(array):
-        padded_array = np.pad(array, padding, mode='median')
+        padded_array = np.pad(array, padding, mode=mode, **kwargs)
         return padded_array
         
     padded_arrays = Parallel(n_jobs=num_jobs)(delayed(process_array)(arr) for arr in array_list)
