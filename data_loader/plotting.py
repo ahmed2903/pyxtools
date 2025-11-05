@@ -160,14 +160,14 @@ def plot_pixel_space(ordered_pixels, connection=False):
     ordered_pixels = np.array(ordered_pixels)
 
     # Create figure
-    fig, ax = plt.subplots(1,1 ,figsize=(12, 6))
+    fig, ax = plt.subplots(1,1 ,figsize=(6, 6))
 
     # Plot original pixel positions (unordered)
-    ax.scatter(ordered_pixels[:, 0], ordered_pixels[:, 1], color='red', label="Pixels")
+    ax.scatter(ordered_pixels[:, 1], ordered_pixels[:, 0], color='red', label="Pixels")
     if connection:
-        ax.plot(ordered_pixels[:, 0], ordered_pixels[:, 1], color='red', label="Pixels")
+        ax.plot(ordered_pixels[:, 1], ordered_pixels[:, 0], color='red', label="Pixels")
 
-    ax.set_title("Original Pixel Coordinates")
+    ax.set_title("Scatter")
     ax.invert_yaxis()  # Invert to match image coordinates
 
     plt.show()

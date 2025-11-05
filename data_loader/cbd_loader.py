@@ -41,14 +41,16 @@ class Exp:
     det_psize: int  
     energy: float #keV
     
-    det_distance: float # microns
+    
     step_size: float # Angstroms
     slow_axis: int  # 0 for x, 1 for y
     fast_axis_steps: int # steps
     
     beamtime: str # new or old
-
+    
+    det_distance: float = field(init=False) # microns
     wavelength: float = field(init=False)
+
     
     def __post_init__(self):
 
@@ -64,8 +66,10 @@ class Exp:
 class ROI:
 
     exp: Exp 
-    coords: np.ndarray = field(default=None, repr=False)
+    kind: str # Bragg or Pupil
     
+    coords: np.ndarray = field(default=None, repr=False)
+
     # acquired later
     data_4d: np.ndarray = field(default=None, repr=False) # 4D Data set (x, y, fx, fy)
     centre_pixel: np.ndarray = field(default=None, repr=False)
@@ -590,14 +594,21 @@ class processor:
                                                                 mask_val, 
                                                                 roi.coords, 
                                                                 crop=False)
-        if roi.centre_pixel is None:
-            roi.centre_pixel = np.array([(roi.kout_coords[:,1].max() + roi.kout_coords[:,1].min() )/2, (roi.kout_coords[:,0].max() + roi.kout_coords[:,0].min() )/2])
+        if roi.centre_pixel is None and roi.kind == 'pupil':
+            roi.centre_pixel = np.array([(roi.kout_coords[:,0].max() + roi.kout_coords[:,0].min() )/2, (roi.kout_coords[:,1].max() + roi.kout_coords[:,1].min() )/2])
+
         
         roi.kouts = compute_vectors(roi.kout_coords, 
                                                 roi.det_distance, 
                                                 roi.det_psize, 
                                                 roi.centre_pixel, 
                                                 roi.wavelength)
+
+        if roi.kind == 'pupil':
+            
+            roi.kins = roi.kouts
+            roi.kin_coords = roi.kout_coords
+            roi.kins_avg = np.mean(roi.kouts, axis = 0, keepdims = True )
     
     
     @staticmethod
@@ -619,6 +630,8 @@ class processor:
         kouts_avg /= np.linalg.norm(kouts_avg)
         
         kins_avg = pupil_roi.kins_avg/np.linalg.norm(pupil_roi.kins_avg)
+
+
         
         angle = np.arccos(np.sum(kins_avg* kouts_avg))
         angle = np.rad2deg(angle)
@@ -631,7 +644,7 @@ class processor:
         
     @log_roi_params
     @staticmethod
-    def compute_kins(roi:ROI, est_ttheta, method = "BFGS", gtol = 1e-6):
+    def compute_kins(roi:ROI, pupil_roi:ROI, est_ttheta, method = "BFGS", gtol = 1e-6):
         """
         Computes the incident wavevectors (kins) for a given region of interest (ROI) 
         by optimizing the initial q-vector estimate.
@@ -656,27 +669,22 @@ class processor:
             - `self.kin_coords[roi_name]`: Pixel coordinates corresponding to `self.kins[roi_name]`.
         """
 
-        if est_ttheta == 0:
+        
             
-            roi.kins = roi.kouts
-            roi.kin_coords = roi.kout_coords
-            roi.kins_avg = np.mean(roi.kouts, axis = 0, keepdims = True )
-             
 
-        else:
         
-            roi.g_init = calc_qvec(roi.kouts, roi.kins_avg)
+        roi.g_init = calc_qvec(roi.kouts, pupil_roi.kins_avg)
+    
+        roi.kins, roi.optimal_angles = optimise_kin(roi.g_init, 
+                                                                          est_ttheta, 
+                                                                          roi.kouts, 
+                                                                          roi.wavelength, 
+                                                                          method, gtol)
         
-            roi.kins, roi.optimal_angles = optimise_kin(roi.g_init, 
-                                                                              est_ttheta, 
-                                                                              roi.kouts, 
-                                                                              roi.wavelength, 
-                                                                              method, gtol)
-            
-            roi.kin_coords = reverse_kins_to_pixels(roi.kins, 
-                                                               roi.det_psize, 
-                                                               roi.det_distance, 
-                                                               roi.centre_pixel)
+        roi.kin_coords = reverse_kins_to_pixels(roi.kins, 
+                                                           roi.det_psize, 
+                                                           roi.det_distance, 
+                                                           roi.centre_pixel)
 
     
         
@@ -890,7 +898,7 @@ class processor:
         roi.coherent_imgs = remove_background_parallel(roi.coherent_imgs, sigma=sigma, n_jobs=num_jobs)
         
     @staticmethod
-    def even_dims_cohimages(roi:ROI, num_jobs = -1):
+    def even_dims_cohimages(roi:ROI, mode = 'constant', num_jobs = -1, **kwargs):
         """Adjusts the dimensions of coherent images to be even.
 
         This method takes the coherent images for a given region of interest (ROI) 
@@ -903,8 +911,8 @@ class processor:
     
         """
         
-        roi.coherent_imgs = make_2dimensions_even(roi.coherent_imgs, num_jobs=num_jobs)
-        roi.averaged_coherent_images = make_2dimensions_even([roi.averaged_coherent_images],
+        roi.coherent_imgs = make_2dimensions_even(roi.coherent_imgs, mode=mode, num_jobs=num_jobs, **kwargs)
+        roi.averaged_coherent_images = make_2dimensions_even([roi.averaged_coherent_images],mode=mode,
                                                                         num_jobs=num_jobs)[0]
     
     
