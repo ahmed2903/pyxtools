@@ -48,7 +48,7 @@ class Exp:
     
     beamtime: str # new or old
     
-    det_distance: float = field(init=False) # microns
+    det_distance: float = field(default = None, repr=True) # microns
     wavelength: float = field(init=False)
 
     
@@ -736,7 +736,7 @@ class processor:
             inplace (bool): if True, it changes the kin_coords, kins, kouts, and kout_coords dict for that roi, if false, if returns the mask. (default = False)
 
         """
-        mask = extract_parallel_line(roi.kin_coords, width=width, offset=offset)
+        mask = extract_parallel_line(roi.kins[:,:2], width=width, offset=offset)
         
         if inplace:
             roi.kins = roi.kins[mask]
@@ -750,7 +750,6 @@ class processor:
             
             return  
         else:
-            print(f'shape of mask is {mask.shape}')
             return mask
         
     @log_roi_params

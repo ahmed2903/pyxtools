@@ -251,16 +251,9 @@ def two_lists_one_slider(img_list1, img_list2, scale_fac=0.3, vmin1 = None, vmax
     def update_image(img_idx):
         """Updates the displayed image when the slider is moved."""
         img1 = img_list1[img_idx]
-        # img_mean1 = np.mean(img1)
 
         img2 = img_list2[img_idx]
-        # img_mean2 = np.mean(img2)
-        
-        # vmin1 = max(img_mean1 - scale_fac * img_mean1, 0)
-        # vmax1 = img_mean1 + scale_fac * img_mean1
-
-        # vmin2 = img_mean2 - scale_fac * img_mean2
-        # vmax2 = img_mean2 + scale_fac * img_mean2
+ 
         
         im1.set_data(img1)  # Update image data
         im1.set_clim(vmin1, vmax1)
