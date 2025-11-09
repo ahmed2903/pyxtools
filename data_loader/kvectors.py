@@ -155,10 +155,6 @@ def compute_vectors(coordinates, detector_distance, pixel_size, central_pixel, w
     Returns:
     - vectors: (N, 3) array of vectors from origin to each pixel.
     """
-    #num_x, num_y = detector_shape
-    
-    #center_x = (num_x - 1) * pixel_size / 2
-    #center_y = (num_y - 1) * pixel_size / 2
 
     center_row, center_col = np.array(central_pixel) * pixel_size
     

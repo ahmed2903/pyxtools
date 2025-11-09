@@ -850,33 +850,26 @@ def threshold_data(image_list, threshold_value):
 
     return np.array(filtered_imgs)
 
-def bilateral_filter(image, sigma_spatial=3, sigma_range=50, kernel_size=7):
-    """
-    Applies bilateral filtering to a 2D grayscale image using OpenCV.
-
-    Args:
-        image (np.ndarray): 2D grayscale image.
-        sigma_spatial (float): Standard deviation for spatial smoothing.
-        sigma_range (float): Standard deviation for intensity (range) smoothing.
-        kernel_size (int): Size of the filter kernel (determines the neighborhood size).
-
-    Returns:
-        np.ndarray: Bilaterally filtered image.
-    """
-
-    # Apply OpenCV bilateral filter
-    filtered_image = cv2.bilateralFilter(image, d=kernel_size, sigmaColor=sigma_range, sigmaSpace=sigma_spatial)
-
-    return filtered_image
-@time_it
-def bilateral_filter_parallel(image_list, sigma_spatial=3, sigma_range=50, kernel_size=7, n_jobs=8):
-
-    # Use joblib to parallelize the median filter application
-    padded_images = Parallel(n_jobs=n_jobs)(
-        delayed(bilateral_filter)(image, sigma_spatial,sigma_range,kernel_size) for image in image_list)
     
-    padded_images = np.array(padded_images)
-    return padded_images
+@time_it
+def bilateral_filter(images, sigma_spatial=3, sigma_range=50, kernel_size=7, n_jobs=8):
+
+    def _bilateral_single(image):
+        return cv2.bilateralFilter(image, d=kernel_size, sigmaColor=sigma_range, sigmaSpace=sigma_spatial)
+    
+    if image_or_stack.ndim == 2:
+        return _bilateral_single(images)
+        
+    elif image_or_stack.ndim == 3:
+        if n_jobs > 1:
+            results = Parallel(n_jobs=n_jobs)(
+                delayed(_bilateral_single)(img) for img in images
+            )
+        else:
+            results = [_bilateral_single(img) for img in image_or_stack]
+            
+        return np.stack(results, axis=0)
+    
 @time_it
 def reorder_pixels_from_center(pixel_coords, connected_array=None):
     """
@@ -891,20 +884,18 @@ def reorder_pixels_from_center(pixel_coords, connected_array=None):
     """
     pixel_coords = np.array(pixel_coords)
 
-    # Compute the centroid (mean of coordinates)
     centroid = np.mean(pixel_coords, axis=0)
 
-    # Find the actual pixel closest to the centroid
+    # Compute distances from the center pixel
     distances = np.linalg.norm(pixel_coords - centroid, axis=1)
     center_idx = np.argmin(distances)  # Index of the closest pixel
     center_pixel = pixel_coords[center_idx]
 
-    # Compute distances from the center pixel
+    
     distances_from_center = np.linalg.norm(pixel_coords - center_pixel, axis=1)
 
     # Sort pixels by increasing distance
     sorted_indices = np.argsort(distances_from_center)
-    # Ensure sorted_indices is a NumPy array and not a tuple
     sorted_indices = np.array(sorted_indices, dtype=int)
     
     return sorted_indices
@@ -927,9 +918,9 @@ def flip_images(images, flip_mode):
     if flip_mode == "xy":
         return images  # No flip
     elif flip_mode == "x_neg_y":
-        return np.flip(images, axis=1)  # Flip along y-axis
+        return np.flip(images, axis=2)  # Flip along y-axis
     elif flip_mode == "neg_x_y":
-        return np.flip(images, axis=2)  # Flip along x-axis
+        return np.flip(images, axis=1)  # Flip along x-axis
     elif flip_mode == "neg_x_neg_y":
         return np.flip(images, axis=(1, 2))  # Flip along both axes
     else:

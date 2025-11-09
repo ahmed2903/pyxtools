@@ -5,6 +5,341 @@ from PIL import Image
 import matplotlib.patches as patches
 from IPython.display import display
 import ipywidgets as widgets
+import os
+import h5py
+from .cbd_loader import ROI
+from .data_fs import mask_hot_pixels
+
+def plot_detector_roi(roi:ROI, file_no, frame_no, title=None, vmin=None, vmax=None,mask_hot = True, save=False):
+    """Plots a region of interest (ROI) on the detector for a given frame.
+
+    Args:
+        roi_name (str): The name of the region of interest (ROI) to be plotted.
+        file_no (int): The file number to retrieve the frame from.
+        frame_no (int): The frame number within the specified file.
+    """
+    direc = roi.directory
+    
+    if roi.beamtime == 'new':
+        file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
+        
+        file_name = os.path.join(direc,f'Scan_{roi.scan_num}_data_{file_no_st}.h5')
+
+        with h5py.File(file_name,'r') as f:
+            data_test = f['/entry/data/data'][frame_no,:,:]
+    else:
+        
+        data_test = stack_4d_data_old(direc, roi.coords, roi.fast_axis_steps, roi.slow_axis)[file_no,frame_no, :,:]
+
+    if mask_hot:
+        data_test = mask_hot_pixels(data_test)
+    if title is None:
+        title = f"Detector image in Frame ({file_no}, {frame_no})"
+    plot_roi_from_numpy(data_test, roi.coords, title, vmin=vmin, vmax=vmax, save = save)
+
+
+
+def plot_full_detector(roi:ROI, file_no, frame_no, 
+                      vmin1=None, vmax1=None, 
+                      vmin2=None, vmax2=None):
+    
+    """
+    Plots a full frame of the detector.
+    Args:
+        file_no (int): The file number to retrieve the frame from.
+        frame_no (int): The frame number within the specified file.
+    """
+    direc = roi.directory
+    if roi.beamtime == 'new':
+        file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
+        
+        file_name = os.path.join(direc , f'Scan_{roi.scan_num}_data_{file_no_st}.h5')
+
+        with h5py.File(file_name,'r') as f:
+            data_test = f['/entry/data/data'][frame_no,:,:]
+    else:
+        data_test = stack_4d_data_old(direc, [0,-1,0,-1], roi.fast_axis_steps, roi.slow_axis)[file_no,frame_no, :,:]
+
+    data_test = mask_hot_pixels(data_test)
+    fig, axes = plt.subplots(1, 2, figsize=(10,5))
+
+    log_data = np.log1p(data_test)
+
+    intensity = axes[0].imshow(data_test, cmap='jet',  vmin = vmin1, vmax = vmax1)
+    axes[0].set_title(f'Full Detector')
+    axes[0].axis('on')  
+    plt.colorbar(intensity, ax=axes[0], fraction=0.046, pad=0.04)
+    log_intensity = axes[1].imshow(log_data, cmap='jet',  vmin=vmin2, vmax=vmax2)
+    axes[1].set_title(f'Log Scale')
+    axes[1].axis('on')
+    plt.colorbar(log_intensity, ax=axes[1], fraction=0.046, pad=0.04)
+    
+    plt.tight_layout()
+    plt.show()
+    
+def plot_4d_dataset(roi : ROI, vmin1 = None, vmax1 = None,vmin2 = None, vmax2 = None):
+    """Plots the 4D dataset for a specified region of interest (ROI).
+
+    Args:
+        roi_name (str): The name of the region of interest (ROI) to visualize. The ROI 
+                         should be present in the `self.ptychographs` dictionary.
+    """
+    # Get dataset dimensions
+    coherent_shape = roi.data_4d.shape[:2]  
+    detector_shape = roi.data_4d.shape[2:]  
+
+    
+    
+    # Set slider limits
+    pcol_slider = widgets.IntSlider(min=0, max= detector_shape[1] - 1, value=detector_shape[1]//2, description="px")
+    prow_slider = widgets.IntSlider(min=0, max= detector_shape[0] - 1, value=detector_shape[0]//2, description="py")
+    
+    lcol_slider = widgets.IntSlider(min=0, max= coherent_shape[1] - 1, value=coherent_shape[1]//2, description="lx")
+    lrow_slider = widgets.IntSlider(min=0, max= coherent_shape[0] - 1, value=coherent_shape[0]//2, description="ly")
+
+
+    rectangle_size_det = 4 
+    rectangle_size_coh = 2
+    
+    # Create the figure and axes **only once**
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+
+    coherent_image = make_coherent_image(roi.data_4d, np.array([prow_slider.value, pcol_slider.value]))
+    detector_image = make_detector_image(roi.data_4d, np.array([lrow_slider.value, lcol_slider.value]))
+
+    vmin_c = vmin1 #np.mean(coherent_image) - 0.05 * np.mean(coherent_image)
+    vmax_c = vmax1 #np.mean(coherent_image) + 0.05 * np.mean(coherent_image)
+    vmin_d = vmin2 #np.mean(detector_image) - 0.3 * np.mean(detector_image)
+    vmax_d = vmax2 #np.mean(detector_image) + 2 * np.mean(detector_image)
+    
+    im0 = axes[0].imshow(coherent_image, cmap='plasma', vmin=vmin_c, vmax=vmax_c)
+    
+    axes[0].set_title(f"Coherent Image (lx={lrow_slider.value}, ly={lcol_slider.value})")
+    rect_coherent = Rectangle(( lcol_slider.value - rectangle_size_coh / 2, lrow_slider.value - rectangle_size_coh / 2), 
+                              rectangle_size_coh, rectangle_size_coh, 
+                              edgecolor='white', facecolor='none', lw=2)
+    
+    axes[0].add_patch(rect_coherent)
+    plt.colorbar(im0, ax=axes[0], label="Intensity")
+
+    im1 = axes[1].imshow(detector_image, cmap='viridis', vmin=vmin_d, vmax=vmax_d)
+    axes[1].set_title(f"Detector Image (px={pcol_slider.value}, py={prow_slider.value})")
+    rect_detector = Rectangle((pcol_slider.value - rectangle_size_det / 2, prow_slider.value - rectangle_size_det / 2), 
+                              rectangle_size_det, rectangle_size_det, 
+                              edgecolor='white', facecolor='none', lw=2)
+    axes[1].add_patch(rect_detector)
+    plt.colorbar(im1, ax=axes[1], label="Detector Intensity")
+
+    plt.tight_layout()
+    
+    def update_plot(prow, pcol, lrow, lcol):
+        """ Updates the plot based on slider values. """
+        coherent_image = make_coherent_image(roi.data_4d, np.array([prow, pcol]))
+        detector_image = make_detector_image(roi.data_4d, np.array([lrow, lcol]))
+
+        vmin_c = np.mean(coherent_image) - 0.05 * np.mean(coherent_image)
+        vmax_c = np.mean(coherent_image) + 0.05 * np.mean(coherent_image)
+        vmin_d = np.mean(detector_image) - 0.3 * np.mean(detector_image)
+        vmax_d = np.mean(detector_image) + .2 * np.mean(detector_image)
+
+        im0.set_data(coherent_image)
+        im1.set_data(detector_image)
+
+        axes[0].set_title(f"Coherent Image from Pixel ({pcol}, {prow})")
+        im0.set_clim(vmin_c, vmax_c)
+        axes[1].set_title(f'Detector Image at Location ({lcol},{lrow})')
+        im1.set_clim(vmin_d, vmax_d)
+        
+        # Update rectangles
+        rect_coherent.set_xy((lcol - rectangle_size_coh / 2, lrow - rectangle_size_coh / 2))
+        rect_detector.set_xy((pcol - rectangle_size_det / 2, prow - rectangle_size_det / 2))
+
+
+        fig.canvas.draw_idle()
+        
+    # Create interactive widget
+    interactive_plot = widgets.interactive(update_plot, prow=prow_slider, pcol=pcol_slider, lrow=lrow_slider, lcol=lcol_slider)
+    
+    display(interactive_plot)  # Display the interactive widget
+
+def plot_coherent_sequence(roi: ROI, scale_factor = .4):
+    """Displays a sequence of coherent images and allows scrolling through them via a slider.
+
+    Args:
+        roi_name (str): The name of the region of interest (ROI) to visualize. The ROI 
+                         should be present in the `self.coherent_imgs` dictionary.
+        scale_factor (float, optional): A factor to scale the maximum color intensity 
+                                         for the images. Default is 0.4.
+    """
+    
+    img_list = roi.coherent_imgs  # List of coherent images
+
+    num_images = len(img_list)  # Number of images in the list
+    
+    # Create a slider for selecting the image index
+    img_slider = widgets.IntSlider(min=0, max=num_images - 1, value=0, description="Image")
+
+    # Create figure & axis once
+    fig, ax = plt.subplots(figsize=(6, 6))
+    
+    # Initial image
+    vmin, vmax = np.min(img_list[0]), np.max(img_list[0])  # Normalize color scale
+    im = ax.imshow(img_list[0], cmap='viridis') #, vmin=vmin, vmax=vmax)
+    ax.set_title(f"Coherent Image {0}/{num_images - 1}")
+    plt.colorbar(im, ax=ax, label="Intensity")
+    plt.tight_layout()
+    
+    def update_image(img_idx):
+        """Updates the displayed image when the slider is moved."""
+        img = img_list[img_idx]
+        img_mean = np.mean(img)
+        vmin = img_mean - 0.05 * img_mean
+        vmax = img_mean + scale_factor * img_mean
+        
+        im.set_data(img)  # Update image data
+        im.set_clim(vmin, vmax)
+        
+        ax.set_title(f"Coherent Image {img_idx}/{num_images - 1}")  # Update title
+        fig.canvas.draw_idle()  # Efficient redraw
+
+    # Create interactive slider
+    interactive_plot = widgets.interactive(update_image, img_idx=img_slider)
+
+    display(interactive_plot)  # Show slider
+    #display(fig)  # Display the figure
+
+
+def plot_averag_coh_imgs(roi:ROI, vmin=None, vmax=None, title=None):
+    """Plots the average of coherent images for a given region of interest (ROI).
+
+    Args:
+        roi: The name of the region of interest (ROI) for which the 
+                         average coherent image will be plotted.
+    """
+    avg = roi.averaged_coherent_images
+    #avg = np.mean(np.array(self.coherent_imgs[roi_name]), axis = 0)
+
+    if title is None:
+        title = f"Average Coherent Images"
+        
+    plot_roi_from_numpy(avg, name=title, vmin=vmin, vmax=vmax)
+    
+def plot_detected_objects(roi:ROI):
+    """Displays the detected objects in coherent images with a slider for navigation.
+
+    Args:
+        roi_name (str): The name of the region of interest (ROI) containing the detected objects.
+
+    """
+    
+    img_list = roi.detected_objects  # List of coherent images
+
+    num_images = len(img_list)  # Number of images in the list
+    
+    # Create a slider for selecting the image index
+    img_slider = widgets.IntSlider(min=0, max=num_images - 1, value=0, description="Image")
+
+    # Create figure & axis once
+    fig, ax = plt.subplots(figsize=(6, 6))
+    
+    # Initial image
+    vmin, vmax = 0,1 # Normalize color scale
+    im = ax.imshow(img_list[0], cmap='viridis') #, vmin=vmin, vmax=vmax)
+    ax.set_title(f"Coherent Image {0}/{num_images - 1}")
+    plt.colorbar(im, ax=ax, label="Intensity")
+    plt.tight_layout()
+    
+    def update_image(img_idx):
+        """Updates the displayed image when the slider is moved."""
+        img = img_list[img_idx]
+        im.set_data(img)  # Update image data
+        
+        ax.set_title(f"Coherent Image {img_idx}/{num_images - 1}")  # Update title
+        fig.canvas.draw_idle()  # Efficient redraw
+
+    # Create interactive slider
+    interactive_plot = widgets.interactive(update_image, img_idx=img_slider)
+
+    display(interactive_plot)  # Show slider
+    #display(fig)  # Display the figure
+    
+
+def plot_intensity_histograms(roi:ROI, bins = 256):
+    """Displays intensity histograms of images in a given ROI and allows scrolling through them via a slider.
+
+    Args:
+        roi_name (str): The name of the region of interest (ROI) for which histograms 
+                         are computed.
+        bins (int, optional): The number of bins to use for the histogram computation. 
+                               Default is 256.
+
+    """
+    histograms = compute_histograms(roi.coherent_imgs, bins=bins)
+
+    num_images = len(histograms)  # Number of images in the list
+    
+    # Create a slider for selecting the image index
+    img_slider = widgets.IntSlider(min=0, max=num_images - 1, value=0, description="Image")
+    
+    # Create figure & axis once
+    fig, ax = plt.subplots(figsize=(6, 6))
+    
+    # Initial image
+    line, = ax.plot(histograms[0])  
+    ax.set_yscale("log")  # Set y-axis to log scale
+    ax.set_title(f"Intensity Histogram {0}/{num_images - 1}")
+    ax.set_ylabel("Log Frequency")
+    plt.tight_layout()
+    
+    def update_image(img_idx):
+        """Updates the displayed image when the slider is moved."""
+        line.set_ydata(histograms[img_idx])  # Update image data
+        
+        ax.set_title(f"Intensity historgram{img_idx}/{num_images - 1}")  # Update title
+        fig.canvas.draw_idle()  # Efficient redraw
+    
+    # Create interactive slider
+    interactive_plot = widgets.interactive(update_image, img_idx=img_slider)
+    
+    display(interactive_plot)  # Show slider
+    
+
+def plot_average_roi(roi:ROI, vmin=None, vmax=None, title=None):
+    """Plots the averaged frames for the specified region of interest (ROI).
+
+    Args:
+        roi_name (str): The name of the region of interest (ROI) whose averaged data 
+                         is to be plotted. The averaged data should be stored in 
+                         `self.averaged_det_data`.
+    """
+    
+    plot_roi_from_numpy(roi.averaged_det_images, [0,-1,0,-1], 
+                        f"Averaged Frames ", 
+                        vmin=vmin, vmax=vmax )
+
+
+def plot_calculated_kins(roi:ROI, pupil_roi:ROI, vmin=None, vmax = None, title="Mapped kins onto pupil", cmap = "viridis"):
+    """Plots the calculated k-in coordinates mapped onto the pupil function.
+    Args:
+        roi_name (str): The name of the region of interest.
+
+    """
+    plot_map_on_detector(pupil_roi.averaged_det_images, roi.kin_coords, 
+                         vmin, vmax, title, cmap, crop=False, roi= pupil_roi.coords)
+
+def plot_kouts(roi:ROI, vmin=None, vmax = None, title="Mapped kouts", cmap = "viridis"):
+    
+    """Plots the calculated k-out coordinates mapped onto the detector.
+
+    Args:
+        roi_name (str): The name of the region of interest.
+
+    """
+    plot_map_on_detector(roi.averaged_det_images, roi.kout_coords, 
+                         vmin, vmax, title, cmap, crop=False,roi= roi.coords)
+
+
+
 
 def plot_roi_from_numpy(array, roi=None, name=None, vmin=None, vmax=None, save = False, **kwargs):
 
