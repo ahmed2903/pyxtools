@@ -147,15 +147,18 @@ class ROI:
             # Save metadata as attributes in the root group
             process_params = h5f.create_group("processing_params")
             
-            process_params.attrs['roi'] = json.dumps(self.roi_coords)
-            
-            for func in self.log_params:
-                # self.log_roi_params[roi_name] is a list, each element correponds to a function 
-                # func is then a dictionary
-                # func["functions"] will be the function name
-                func_name = func['function']
-                func.pop('function')
-                process_params.attrs[func_name] = json.dumps(func)
+            process_params.attrs['roi'] = json.dumps(self.coords)
+            process_params.attrs['step_size'] = self.step_size
+            process_params.attrs['det_distance'] = self.det_distance
+
+            # for i, func in enumerate(self.log_params):
+            #     # self.log_roi_params[roi_name] is a list, each element correponds to a function 
+            #     # func is then a dictionary
+            #     # func["functions"] will be the function name
+            #     # func_name = func['function']
+            #     # func.pop('function')
+            #     # process_params.attrs[func['function']] = json.dumps(func[args]) 
+            #     process_params.attrs[func['function']] = json.dumps(func['args']) +' '+ json.dumps(func['kwargs'])
 
             images = h5f.create_group("processed_images")
             images.create_dataset("coherent_images", data=self.coherent_imgs, compression="gzip",chunks=True)
@@ -179,10 +182,15 @@ class ROI:
             file_path (str): Path to the HDF5 file containing saved data.
         """
         self = cls.__new__(cls)
-        
+
         with h5py.File(file_path, "r") as h5f:
                                         
             # Load Processed Images 
+            params = h5f["processing_params"]
+            
+            self.step_size = params.attrs['step_size']
+            
+            
             images = h5f["processed_images"]
             
             self.coherent_imgs = images["coherent_images"][...]
@@ -308,7 +316,7 @@ def make_4d_dataset(roi: ROI, num_jobs = 64):
     
     if roi.beamtime == 'old':
         # Just for naming
-        direc = os.path.join(roi.directory , "Scan_{roi.scan_num}_data_000001.h5")
+        direc = os.path.join(roi.directory , f"Scan_{roi.scan_num}_data_000001.h5")
         if roi.fast_axis_steps is None:
             raise ValueError("fast_axis_steps is required")            
         
@@ -343,11 +351,40 @@ def estimate_pupil_size(pupil_roi:ROI, mask_val):
         self.pupil_size: The estimated pupil size, computed using the averaged pupil data
         and the given mask threshold.
     """
-    pupil_size = estimate_pupil_size(pupil_roi.averaged_det_images, 
-                       mask_val=mask_val,
-                       pixel_size=pupil_roi.det_psize)
+    # pupil_size = estimate_pupil_size(pupil_roi.averaged_det_images, 
+    #                    mask_val=mask_val,
+    #                    pixel_size=pupil_roi.det_psize)
 
-    return pupil_size
+    array = pupil_roi.averaged_det_images
+    pixel_size = pupil_roi.det_psize
+
+    min_lx = array.shape[0] /3
+    min_ly = array.shape[1] /3
+    
+    nx , ny = np.where(array>mask_val)
+
+    x_lengths = []
+    for x in np.unique(nx):
+        y_indices = np.where(array[x,:] > mask_val)[0]
+        if len(y_indices) > min_lx:
+            x_lengths.append(y_indices[-1] - y_indices[0] + 1)
+
+    
+    y_lengths = []
+    for y in np.unique(ny):
+        x_indices = np.where(array[:,y] > mask_val)[0]
+        if len(x_indices) > min_ly:
+            y_lengths.append(x_indices[-1] - x_indices[0] + 1)
+
+    x_lengths = np.array(x_lengths) 
+    y_lengths = np.array(y_lengths)
+
+    avg_x = np.max(x_lengths) * pixel_size
+    avg_y = np.max(y_lengths) * pixel_size
+
+    return avg_x, avg_y
+    
+    # return pupil_size
 
 def add_lens(focal_length:float, height:float):
     """
@@ -362,7 +399,7 @@ def add_lens(focal_length:float, height:float):
 
     return lens_na
 
-def estimate_detector_distance_from_NA(na1, na2, pupil_size):
+def estimate_detector_distance(na1, na2, pupil_size):
     """
     Estimates the average detector distance based on the range of numerical apertures (NA)
     from the added lenses and current pupil size.
@@ -378,8 +415,8 @@ def estimate_detector_distance_from_NA(na1, na2, pupil_size):
         largest_na = max(largest_na, na)
         smallest_na = min(smallest_na, na)    
     
-    distance1 = estimate_detector_distance_from_NA(largest_na, max(pupil_size))
-    distance2 = estimate_detector_distance_from_NA(smallest_na, min(pupil_size))
+    distance1 = estimate_detector_distance_from_NA(largest_na, pupil_size=max(pupil_size))
+    distance2 = estimate_detector_distance_from_NA(smallest_na, pupil_size=min(pupil_size))
 
     print(f"First detector distance is {distance1} microns")
     print(f"Second detector distance is {distance2} mircons")
@@ -598,7 +635,6 @@ def refine_kins(roi:ROI, shifts):
 
 
 
-@log_roi_params
 def select_single_pixel_streak(roi:ROI, width=1, offset=0, inplace = False):
 
     """
@@ -629,7 +665,6 @@ def select_single_pixel_streak(roi:ROI, width=1, offset=0, inplace = False):
     else:
         return mask
     
-@log_roi_params
 def select_streak_region(roi:ROI, percentage=10, start_position='lowest', start_idx=None, inplace = False):
     """
     Selects a region of the streak based on a percentage of its total size.
@@ -884,7 +919,7 @@ def mask_region_cohimgs(roi:ROI, region, mode = 'zeros'):
         roi.coherent_imgs[:,sx:ex,sy:ey] = 1.0
         roi.update_averaged_coherent_images()
         
-def align_coherent_images(roi:ROI):
+def align_coherent_images(roi:ROI, ref_idx = None):
     """Aligns a list of coherent images for a given region of interest (ROI).
 
     Args:
@@ -892,4 +927,32 @@ def align_coherent_images(roi:ROI):
                          will be aligned.
 
     """
-    roi.coherent_imgs = align_images(roi.coherent_imgs)
+    print('aligned coherent images')
+    roi.coherent_imgs = align_images(roi.coherent_imgs, ref_idx = ref_idx)
+
+def flip_images(roi:ROI, flip_mode):
+    """
+    Flips images based on the selected mode.
+    
+    Args:
+        images (np.ndarray): A batch of images with shape (N, H, W).
+        flip_mode (str): The flipping mode, one of:
+                        - "xy"  (original)
+                        - "x_neg_y" (flip y-axis)
+                        - "neg_x_y" (flip x-axis)
+                        - "neg_x_neg_y" (flip both axes)
+
+    Returns:
+        np.ndarray: The transformed batch of images.
+    """
+    if flip_mode == "xy":
+        return roi.coherent_imgs  # No flip
+    elif flip_mode == "x_neg_y":
+        return np.flip(roi.coherent_imgs, axis=1)  # Flip along y-axis
+    elif flip_mode == "neg_x_y":
+        return np.flip(roi.coherent_imgs, axis=2)  # Flip along x-axis
+    elif flip_mode == "neg_x_neg_y":
+        return np.flip(roi.coherent_imgs, axis=(1, 2))  # Flip along both axes
+    else:
+        raise ValueError(f"Invalid flip_mode: {flip_mode}")
+        

@@ -3,12 +3,13 @@ import numpy as np
 from .utils import time_it
 from PIL import Image 
 import matplotlib.patches as patches
+from matplotlib.patches import Rectangle
 from IPython.display import display
 import ipywidgets as widgets
 import os
 import h5py
 from .cbd_loader import ROI
-from .data_fs import mask_hot_pixels
+from .data_fs import mask_hot_pixels, make_coherent_image, make_detector_image, stack_4d_data_old
 
 def plot_detector_roi(roi:ROI, file_no, frame_no, title=None, vmin=None, vmax=None,mask_hot = True, save=False):
     """Plots a region of interest (ROI) on the detector for a given frame.
@@ -28,8 +29,9 @@ def plot_detector_roi(roi:ROI, file_no, frame_no, title=None, vmin=None, vmax=No
         with h5py.File(file_name,'r') as f:
             data_test = f['/entry/data/data'][frame_no,:,:]
     else:
-        
-        data_test = stack_4d_data_old(direc, roi.coords, roi.fast_axis_steps, roi.slow_axis)[file_no,frame_no, :,:]
+        file_no_st = '0'*5 + str(1)
+        filename = os.path.join(direc,f'Scan_{roi.scan_num}_data_{file_no_st}.h5')
+        data_test = stack_4d_data_old(filename, roi.coords, roi.fast_axis_steps, roi.slow_axis)[file_no,frame_no, :,:]
 
     if mask_hot:
         data_test = mask_hot_pixels(data_test)
@@ -58,7 +60,9 @@ def plot_full_detector(roi:ROI, file_no, frame_no,
         with h5py.File(file_name,'r') as f:
             data_test = f['/entry/data/data'][frame_no,:,:]
     else:
-        data_test = stack_4d_data_old(direc, [0,-1,0,-1], roi.fast_axis_steps, roi.slow_axis)[file_no,frame_no, :,:]
+        file_no_st = '0'*5 + str(1)
+        filename = os.path.join(direc,f'Scan_{roi.scan_num}_data_{file_no_st}.h5')
+        data_test = stack_4d_data_old(filename, [0,-1,0,-1], roi.fast_axis_steps, roi.slow_axis)[file_no,frame_no, :,:]
 
     data_test = mask_hot_pixels(data_test)
     fig, axes = plt.subplots(1, 2, figsize=(10,5))

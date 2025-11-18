@@ -181,8 +181,9 @@ def print_hdf5_keys(file_path):
         f.visititems(print_keys)
 
 @time_it        
-def stack_4d_data_old(file_path,roi, fast_axis_steps, slow_axis = 0):
+def stack_4d_data_old(file_path, roi, fast_axis_steps, slow_axis = 0):
 
+    print(file_path)
     
     nx = roi[1] - roi[0] # roi vertical size
     ny = roi[3] - roi[2] # roi horizontal size
@@ -501,7 +502,7 @@ def phase_correlation(ref_img, shifted_img):
     shift = np.array(max_loc) - np.array(ref_img.shape) // 2  # Shift relative to center
     return shift  # Invert shift to align image
     
-def align_images(image_list):
+def align_images(image_list, ref_idx = None):
     """Align a list of shifted images based on the first image.
 
     This function aligns the images by calculating the shift between the reference image 
@@ -515,13 +516,16 @@ def align_images(image_list):
         list of np.ndarray: A list of aligned images.
     
     """
+    print(ref_idx)
     aligned_images = []
-    ref_img = image_list[0]  # Use first image as reference
-    aligned_images.append(ref_img)
+    if ref_idx is None:
+        ref_idx = len(image_list)//2
+    ref_img = image_list[ref_idx]  # Use first image as reference
+    # aligned_images.append(ref_img)
     
-    for img in image_list[1:]:
-        avg = np.mean(np.array(aligned_images), axis = 0)    
-        shift = phase_correlation(avg, img)  # Find shift
+    for img in image_list:
+        # avg = np.mean(np.array(aligned_images), axis = 0)    
+        shift = phase_correlation(ref_img, img)  # Find shift
         aligned_img = scipy.ndimage.shift(img, shift, mode='constant')  # Apply shift
         aligned_images.append(aligned_img)
 
@@ -872,16 +876,7 @@ def bilateral_filter(images, sigma_spatial=3, sigma_range=50, kernel_size=7, n_j
     
 @time_it
 def reorder_pixels_from_center(pixel_coords, connected_array=None):
-    """
-    Reorders a list of pixel coordinates so that the sequence starts at the center
-    and expands outward
 
-    Args:
-        pixel_coords: List of (x, y) pixel coordinates.
-
-    Returns:
-        list of tuples: Indices of reordered pixel coordinates.
-    """
     pixel_coords = np.array(pixel_coords)
 
     centroid = np.mean(pixel_coords, axis=0)
@@ -894,7 +889,6 @@ def reorder_pixels_from_center(pixel_coords, connected_array=None):
     
     distances_from_center = np.linalg.norm(pixel_coords - center_pixel, axis=1)
 
-    # Sort pixels by increasing distance
     sorted_indices = np.argsort(distances_from_center)
     sorted_indices = np.array(sorted_indices, dtype=int)
     
