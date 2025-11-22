@@ -101,9 +101,13 @@ def average_data(data_folder, names_array, roi, conc=False, num_jobs=16):
     
     else: 
         all_data = []
-        for i in range(len(names_array)):
-            all_data.append(  load_hdf_roi(data_folder, names_array[i], roi)  )
-
+        for i in tqdm(range(len(names_array))):
+            args = args_list[i]
+            try: 
+                data = load_hdf_roi(args)
+                all_data.append(  load_hdf_roi(args)  )
+            except:
+                print(f"failed to load frame no. {i}")
             
     stacked_data = np.concatenate(all_data,axis=0)
     average_data = np.mean(stacked_data, axis=0)
@@ -142,11 +146,13 @@ def stack_4d_data(data_folder, names_array, roi, slow_axis = 0, conc = False, nu
     ny = roi[3] - roi[2] # roi horizontal size
     
     args_list = [(data_folder, name, roi) for name in names_array]
+    
     if conc:
         #with concurrent.futures.ProcessPoolExecutor() as executor:
         #    all_data = list(executor.map(load_hdf_roi, [data_folder]*len(names_array), names_array, [roi]*len(names_array)))
         with Pool(processes=num_jobs) as pool:
             all_data = list(pool.imap(load_hdf_roi, args_list))        
+    
     else:
         all_data = []
         for i in range(len(names_array)):
@@ -154,7 +160,6 @@ def stack_4d_data(data_folder, names_array, roi, slow_axis = 0, conc = False, nu
         all_data = np.array(all_data)
         
     stacked_data = np.stack(all_data, axis=0)
-
     if slow_axis == 0: 
 
         stacked_data = np.transpose(stacked_data, (1,0,2,3))

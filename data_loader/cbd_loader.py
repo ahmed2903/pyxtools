@@ -35,19 +35,25 @@ class Exp:
     
     step_size: float # Angstroms
     slow_axis: int  # 0 for x, 1 for y
-    fast_axis_steps: int # steps
     
-    beamtime: str # new or old
+    beamtime: str = field(default = 'new', repr = False) # new or old
     
     det_distance: float = field(default = None, repr=True) # microns
     wavelength: float = field(init=False)
+    fast_axis_steps: int = field(default = None, repr = True) # steps
 
+    detector: str = field(default = 'Eiger', repr = True)
     
     def __post_init__(self):
 
         self.wavelength = energy2wavelength_a(self.energy)
         base_path = Path(self.directory)
-        new_dir = f"Scan_{self.scan_num}"
+        if self.detector == 'Eiger':
+            
+            new_dir = f"Scan_{self.scan_num}"
+
+        elif self.detector == 'Lambda':
+            new_dir = f"Scan_{self.scan_num}_Lambda"
 
         self.directory = os.path.join(base_path, new_dir)
 
@@ -313,6 +319,7 @@ def make_4d_dataset(roi: ROI, num_jobs = 64):
     Returns:
         The 4D dataset for the given ROI.
     """
+
     
     if roi.beamtime == 'old':
         # Just for naming
@@ -326,7 +333,9 @@ def make_4d_dataset(roi: ROI, num_jobs = 64):
                                     roi.slow_axis)
         
     else:
+        
         direc = roi.directory
+        print(direc)
         fnames = list_datafiles(direc)[:-2]       
         data_4d = stack_4d_data(direc, 
                                                     fnames, 
@@ -334,6 +343,7 @@ def make_4d_dataset(roi: ROI, num_jobs = 64):
                                                     slow_axis = roi.slow_axis, 
                                                     conc=True, 
                                                     num_jobs=num_jobs)
+
     
     roi.data_4d = mask_hot_pixels(data_4d, 
                                 mask_max_coh = False, 
