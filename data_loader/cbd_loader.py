@@ -336,15 +336,20 @@ def make_4d_dataset(roi: ROI, num_jobs = 64):
         
         direc = roi.directory
         print(direc)
-        fnames = list_datafiles(direc)[:-2]       
-        data_4d = stack_4d_data(direc, 
-                                                    fnames, 
+        fnames = list_datafiles(direc)[:-2]     
+        if roi.detector == 'Eiger':
+            data_4d = stack_4d_data(direc, fnames, 
                                                     roi.coords, 
                                                     slow_axis = roi.slow_axis, 
                                                     conc=True, 
                                                     num_jobs=num_jobs)
-
-    
+            
+        elif roi.detector == 'Lambda':
+            data_4d = stack_4d_data_lambda(direc, fnames, 
+                                                    roi.coords, 
+                                                    slow_axis = roi.slow_axis, 
+                                                    conc=True, 
+                                                    num_jobs=num_jobs)
     roi.data_4d = mask_hot_pixels(data_4d, 
                                 mask_max_coh = False, 
                                 mask_min_coh = False)

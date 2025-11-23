@@ -63,7 +63,7 @@ def list_datafiles(data_folder):
     f_names = []
     
     for filename in sorted(os.listdir(data_folder)):
-        if filename.endswith(".h5"):
+        if filename.endswith(".h5") or filename.endswith('.nxs'):
             f_names.append(filename)
                 
     return f_names
@@ -164,6 +164,48 @@ def stack_4d_data(data_folder, names_array, roi, slow_axis = 0, conc = False, nu
 
         stacked_data = np.transpose(stacked_data, (1,0,2,3))
     
+    return stacked_data
+
+def load_nxs_roi(args):
+    data_folder, filename, roi = args
+    x0, x1, y0, y1 = roi
+
+    filepath = f"{data_folder}/{filename}"
+
+    with h5py.File(filepath, "r") as f:
+
+        # Standard NeXus path for detector data
+        dataset = f["/entry/instrument/detector/data"]
+
+        # Read only the ROI slice from disk (no full load!)
+        frame = dataset[:, x0:x1, y0:y1]
+
+    return frame
+    
+@time_it 
+def stack_4d_data_lambda(data_folder, names_array, roi,
+                         slow_axis=0, conc=False, num_jobs=4):
+
+    nx = roi[1] - roi[0]  # vertical ROI size
+    ny = roi[3] - roi[2]  # horizontal ROI size
+
+    print('hi')
+    args_list = [(data_folder, name, roi) for name in names_array]
+
+    if conc:
+        with Pool(processes=num_jobs) as pool:
+            all_data = list(pool.imap(load_nxs_roi, args_list))
+    else:
+        all_data = [load_nxs_roi(args) for args in args_list]
+
+    all_data = np.array(all_data)
+
+    # shape fixes
+    stacked_data = np.stack(all_data, axis=0)
+
+    if slow_axis == 0:
+        stacked_data = np.transpose(stacked_data, (1, 0, 2, 3))
+
     return stacked_data
     
 def print_hdf5_keys(file_path):
