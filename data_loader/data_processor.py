@@ -18,296 +18,13 @@ import os
 from .data_fs import *
 from .kvectors import make_coordinates, compute_vectors, optimise_kin, reverse_kins_to_pixels, rotation_matrix, calc_qvec, extract_parallel_line, extract_streak_region
 
-from .utils import time_it, energy2wavelength_a
+from .utils import time_it, energy2wavelength_a, log_roi_params
 from .geometry import *
 
-    
-
-@dataclass
-class Exp:
-    
-    directory : str
-    scan_num: int
-
-    det_psize: int  
-    energy: float #keV
-    
-    
-    step_size: float # Angstroms
-    slow_axis: int  # 0 for x, 1 for y
-    
-    beamtime: str = field(default = 'new', repr = False) # new or old
-    
-    det_distance: float = field(default = None, repr=True) # microns
-    wavelength: float = field(init=False)
-    fast_axis_steps: int = field(default = None, repr = True) # steps
-
-    detector: str = field(default = 'Eiger', repr = True)
-    
-    def __post_init__(self):
-
-        self.wavelength = energy2wavelength_a(self.energy)
-        base_path = Path(self.directory)
-        if self.detector == 'Eiger':
-            
-            new_dir = f"Scan_{self.scan_num}"
-
-        elif self.detector == 'Lambda':
-            new_dir = f"Scan_{self.scan_num}_Lambda"
-
-        self.directory = os.path.join(base_path, new_dir)
-
-@dataclass
-class ROI:
-
-    exp: Exp 
-    kind: str # Bragg or Pupil
-    
-    coords: np.ndarray = field(default=None, repr=False)
-
-    # acquired later
-    data_4d: np.ndarray = field(default=None, repr=False) # 4D Data set (x, y, fx, fy)
-    centre_pixel: np.ndarray = field(default=None, repr=False)
-    
-    # to be set automatically
-    __averaged_det_images: np.ndarray = field(default=None, repr=False)  # Average of all detector frames 
-    __averaged_coherent_images: np.ndarray = field(default=None, repr=False)
-    
-    # Data
-    # needs to be set manually
-    detected_objects: np.ndarray = field(default=None, repr=False) # Detected Objects
-    coherent_imgs: np.ndarray = field(default=None, repr=False)
-    
-    # k-space params
-    kout_coords: np.ndarray = field(default=None, repr=False)  # Coords
-    kouts: np.ndarray = field(default=None, repr=False)  # Kout vectors
-    kin_coords: np.ndarray = field(default=None, repr=False)  # Coords
-    kins: np.ndarray = field(default=None, repr=False)  # Kin vectors
-    
-    kins_avg: np.ndarray = field(default=None, repr=False)  # average Kins 
-    # For computing kins 
-    optimal_angles: list = field(default=None, repr=False)  # Euler angles that rotate Kout to Kin
-    est_ttheta: float = field(default=None, repr=False)
-    g_init: np.ndarray = field(default=None, repr=False)  # Initial G vector for a Signal
-        
-    log_params: list = field(default_factory=list, repr = False)
-    
-    checkpoint_stack:list = field(default_factory=list, repr = False)
-
-
-    # _______________ functionality with Exp ___________
-
-    def __post_init__(self):
-        # Copy attributes from Exp into ROI
-        for f in fields(self.exp):
-            setattr(self, f.name, getattr(self.exp, f.name))
-
-        
-    # _______________ Properties ________________
-    @property
-    def averaged_det_images(self):
-        
-        if self.__averaged_det_images is None:
-            self.__averaged_det_images = np.mean(self.data_4d, axis=(0,1))
-            
-        return self.__averaged_det_images
-
-    def update_averaged_det_images(self):
-        self.__averaged_det_images = np.mean(self.data_4d, axis=(0,1))
-
-    @averaged_det_images.setter
-    def averaged_det_images(self, value):
-        self.__averaged_det_images = value
-        
-    @property
-    def averaged_coherent_images(self):
-        
-        if self.__averaged_coherent_images is None:
-            self.__averaged_coherent_images = np.mean(self.data_4d, axis=(2,3))
-        
-        return self.__averaged_coherent_images
-    
-    @averaged_coherent_images.setter
-    def averaged_coherent_images(self, value):
-        self.__averaged_coherent_images = value
-        
-    def update_averaged_coherent_images(self):
-        self.__averaged_coherent_images = np.mean(self.data_4d, axis=(2,3))
-    
-    
-    # _______________ Saving ___________________
-    
-    @time_it
-    def save(self, file_path):
-    
-        """
-        Save the processed data and metadata to an HDF5 file.
-    
-        Args:
-
-            file_path (str): The path where the HDF5 file will be saved.
-        """
-
-        with h5py.File(file_path, "w") as h5f:
-
-            # Save metadata as attributes in the root group
-            process_params = h5f.create_group("processing_params")
-            
-            process_params.attrs['roi'] = json.dumps(self.coords)
-            process_params.attrs['step_size'] = self.step_size
-            process_params.attrs['det_distance'] = self.det_distance
-
-            # for i, func in enumerate(self.log_params):
-            #     # self.log_roi_params[roi_name] is a list, each element correponds to a function 
-            #     # func is then a dictionary
-            #     # func["functions"] will be the function name
-            #     # func_name = func['function']
-            #     # func.pop('function')
-            #     # process_params.attrs[func['function']] = json.dumps(func[args]) 
-            #     process_params.attrs[func['function']] = json.dumps(func['args']) +' '+ json.dumps(func['kwargs'])
-
-            images = h5f.create_group("processed_images")
-            images.create_dataset("coherent_images", data=self.coherent_imgs, compression="gzip",chunks=True)
-                
-            kvectors = h5f.create_group("kvectors")
-            kvectors.create_dataset("kins", data=self.kins, compression="gzip")
-            kvectors.create_dataset("kouts", data = self.kouts, compression='gzip')
-            kvectors.create_dataset("kin_coords", data=self.kin_coords, compression="gzip")
-            kvectors.create_dataset("kout_coords", data = self.kout_coords, compression='gzip')
-                
-            print(f"Data saved at {file_path}")
-    
-
-    @classmethod
-    def load_data(cls, file_path):
-        """
-        Load processed data and metadata for a specific ROI from an HDF5 file.
-    
-        Args:
-            roi_name (str): The ROI name for which the data should be loaded.
-            file_path (str): Path to the HDF5 file containing saved data.
-        """
-        self = cls.__new__(cls)
-
-        with h5py.File(file_path, "r") as h5f:
-                                        
-            # Load Processed Images 
-            params = h5f["processing_params"]
-            
-            self.step_size = params.attrs['step_size']
-            
-            
-            images = h5f["processed_images"]
-            
-            self.coherent_imgs = images["coherent_images"][...]
-            
-            # Load K-Vectors 
-            kvectors = h5f["kvectors"]
-            
-            self.kins = kvectors['kins'][...]
-            self.kouts = kvectors['kouts'][...]
-            self.kin_coords = kvectors['kin_coords'][...]
-            self.kout_coords = kvectors['kout_coords'][...]
-                
-        return self
-    
-    
-    @time_it
-    def save_4d(self, file_path):
-    
-        """
-        Save the 4D data set for an roi to an HDF5 file.
-    
-        Args:
-            roi_name (str): The ROI name for which the data should be saved.
-
-            file_path (str): The path where the HDF5 file will be saved.
-        """
-
-        with h5py.File(file_path, "w") as h5f:
-            data = h5f.create_group("data")
-            # Save metadata as attributes in the root group
-            data.create_dataset("data", data = self.data_4d, compression="gzip",chunks=True)
-
-        print(f"Data saved at {file_path}")
-    @time_it
-    def load_4d(self, file_path):
-    
-        """
-        Load the 4D data set for an roi from an HDF5 file.
-    
-        Args:
-            roi_name (str): The ROI name for which the data should be loaded.
-
-            file_path (str): The path where the HDF5 is stored.
-        """
-        print("Loading data ...")
-        with h5py.File(file_path, "r") as h5f:
-            data = h5f["data"]
-            # Save metadata as attributes in the root group
-            self.data_4d = np.array(data["data"])
-
-        print("Data loaded")
-
-    # _____________ Checkpointing _____________
-    
-    def checkpoint_state(self):
-        """Save a deep copy of the current state for potential rollback."""
-        state = copy.deepcopy({
-            key: getattr(self, key)
-            for key in self.__dataclass_fields__.keys()
-            if key not in ("checkpoint_stack", "log_params")  # don't save logs or stack itself
-        })
-        self.checkpoint_stack.append(state)
-        print(f"[ROI] Checkpoint #{len(self.checkpoint_stack)} created.")
-
-    def restore_checkpoint(self):
-        """Restore the most recent checkpoint."""
-        if not self.checkpoint_stack:
-            print("[ROI] No checkpoints to restore.")
-            return
-
-        last_state = self.checkpoint_stack.pop()
-        for key, value in last_state.items():
-            setattr(self, key, value)
-    
-    def auto_checkpoint(func):
-        @wraps(func)
-        def wrapper(self, *args, **kwargs):
-            self.checkpoint_state()
-            return func(self, *args, **kwargs)
-        return wrapper
-    
-def log_roi_params(func):
-    """
-    Decorator for class methods that logs function calls and parameters per ROI.
-    Assumes all methods have `roi_name` as the first positional argument after `self`
-    """
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        # Get roi_name (first arg after self)
-        mod_kwargs = kwargs.copy()
-        
-        try:
-            roi = args[0]
-        except:
-            roi = kwargs['roi']
-            mod_kwargs.pop("roi")
-            assert len(args) == 0 
-
-        entry = {
-            "function": func.__name__,
-            "args": args[1:],  
-            "kwargs": mod_kwargs
-        }
-
-        roi.log_params.append(entry)
-    
-        return func(*args, **kwargs)
-
-    return wrapper
+from .cbd_loader_ import ROI, Scan, Exp
 
 ################### Loading data ###################
+
 @time_it
 def make_4d_dataset(roi: ROI, num_jobs = 64):
     
@@ -321,36 +38,39 @@ def make_4d_dataset(roi: ROI, num_jobs = 64):
     """
 
     
-    if roi.beamtime == 'old':
-        # Just for naming
-        direc = os.path.join(roi.directory , f"Scan_{roi.scan_num}_data_000001.h5")
-        if roi.fast_axis_steps is None:
-            raise ValueError("fast_axis_steps is required")            
+    
         
-        data_4d = stack_4d_data_old(direc, 
-                                    roi.coords, 
-                                    roi.fast_axis_steps, 
-                                    roi.slow_axis)
+    # try:
         
-    else:
+    direc = roi.data_dir
+    print(direc)
+    fnames = list_datafiles(direc)[:-2]     
+    
+    if roi.detector == 'Eiger':
+        data_4d = stack_4d_data(direc, fnames,  roi.coords, 
+                                                slow_axis = roi.slow_axis, 
+                                                conc=True, 
+                                                num_jobs=num_jobs)
         
-        direc = roi.directory
-        print(direc)
-        fnames = list_datafiles(direc)[:-2]     
-        if roi.detector == 'Eiger':
-            data_4d = stack_4d_data(direc, fnames, 
-                                                    roi.coords, 
-                                                    slow_axis = roi.slow_axis, 
-                                                    conc=True, 
-                                                    num_jobs=num_jobs)
-            
-        elif roi.detector == 'Lambda':
-            data_4d = stack_4d_data_lambda(direc, fnames, 
-                                                    roi.coords, 
-                                                    slow_axis = roi.slow_axis, 
-                                                    conc=True, 
-                                                    num_jobs=num_jobs)
-            
+    elif roi.detector == 'Lambda':
+        
+        data_4d = stack_4d_data_lambda(direc, fnames, 
+                                                roi.coords, 
+                                                slow_axis = roi.slow_axis, 
+                                                conc=True, 
+                                                num_jobs=num_jobs)
+
+    # except:
+    #     direc = os.path.join(roi.data_dir , f"Scan_{roi.scan_num}_data_000001.h5")
+        
+    #     if roi.fast_axis_steps is None:
+    #         raise ValueError("fast_axis_steps is required")            
+        
+    #     data_4d = stack_4d_data_old(direc, 
+    #                                 roi.coords, 
+    #                                 roi.fast_axis_steps, 
+    #                                 roi.slow_axis)
+        
     roi.data_4d = mask_hot_pixels(data_4d, 
                                 mask_max_coh = False, 
                                 mask_min_coh = False)
@@ -457,8 +177,7 @@ def pool_detector_space(roi:ROI, kernel_size, padding=0):
                                   edges of the image before pooling. Defaults to 0.
     """
     print("Pooling detector ...")
-    roi.data_4d = sum_pool2d_array(roi.data_4d, 
-                                                   kernel_size=kernel_size,
+    roi.data_4d = sum_pool2d_array(roi.data_4d, kernel_size=kernel_size,
                                                    stride=None,
                                                    padding=0)
             
@@ -485,11 +204,11 @@ def normalise_detector(cls, roi:ROI, reference_roi:ROI):
     """
     try:
         peak_intensity = np.sum(reference_roi.data_4d, axis=(-2,-1))
+        
     except: 
         cls.make_4d_dataset(reference_roi)
         peak_intensity = np.sum(reference_roi.data_4d, axis=(-2,-1))
         print(peak_intensity.shape)
-    
     
     avg_intensity = np.mean(peak_intensity)
     roi.data_4d = roi.data_4d/peak_intensity[...,np.newaxis, np.newaxis] * avg_intensity

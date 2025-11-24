@@ -19,7 +19,7 @@ def plot_detector_roi(roi:ROI, file_no, frame_no, title=None, vmin=None, vmax=No
         file_no (int): The file number to retrieve the frame from.
         frame_no (int): The frame number within the specified file.
     """
-    direc = roi.directory
+    direc = roi.data_dir
     
     if roi.beamtime == 'new':
         file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
@@ -51,7 +51,7 @@ def plot_full_detector(roi:ROI, file_no, frame_no,
         file_no (int): The file number to retrieve the frame from.
         frame_no (int): The frame number within the specified file.
     """
-    direc = roi.directory
+    direc = roi.data_dir
     if roi.beamtime == 'new':
         file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
         

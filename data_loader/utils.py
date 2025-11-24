@@ -6,6 +6,7 @@ from functools import wraps
 ####################
 # Conversions #
 ####################
+
 hplanck = 6.62606868E-34  # Js  Plank consant
 c = 299792458  # m/s   Speed of light
 Ang = 1e-10  # m Angstrom
@@ -14,6 +15,7 @@ emass = 9.109e-31  # kg Electron rest mass
 r0 = 2.8179403227e-15  # m classical electron radius = e^2/(4pi*e0*me*c^2)
 
 UNIT_MAP = {
+    "Angs": 1e-1,
     "pm": 1e-3,
     "nm": 1,
     "um": 1e3,
@@ -99,7 +101,7 @@ def inject_attrs(obj, d, scan):
             attr = 'exposure_time'
             setattr(obj, attr, v)
 
-        if 'step' in attr or 'point' in attr and not hasattr(obj, attr):
+        if ('step' in attr or 'point' in attr) and 'size' not in attr and not hasattr(obj, attr):
             setattr(obj, attr, v)
 
 

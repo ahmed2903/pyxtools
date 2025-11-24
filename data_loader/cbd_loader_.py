@@ -13,38 +13,24 @@ import re
 
 import glob
 import os 
-from .utils import time_it, parse_log, energy2wavelength_a, log_roi_params, inject_attrs
+from .utils import time_it, parse_log, energy2wavelength_a, log_roi_params, inject_attrs, wavelength_a2energy
+from . import utils as ut
 
 @dataclass
 class Exp:
     year: int
     beamtime_id: str
-    energy: float # keV
-    detector: str = "Eiger"
-
-    beamline: str = "P11"
+    # energy: float # keV
+    beamline: str = "p11"
     det_distance: float = None   # microns
 
     def __post_init__(self):
-        self.wavelength = energy2wavelength_a(self.energy)  # angstroms
-
         base = f"/asap3/petra3/gpfs/{self.beamline}/{self.year}/data/{self.beamtime_id}/raw"
         self.scan_frames_dir = os.path.join(base, "scan_frames")
         self.logs_dir = os.path.join(base, "server_log", "Scan_logs")
-
-    # ---- directories ----
-    def scan_dir(self, scan_num):
-        """Returns full directory for a particular scan number."""
-        if self.detector == "Eiger":
-            return os.path.join(self.scan_frames_dir, f"Scan_{scan_num}")
-        else:
-            return os.path.join(self.scan_frames_dir, f"Scan_{scan_num}_{self.detector}")
-
-    def log_file(self, scan_num):
-        return os.path.join(self.logs_dir, f"Scan_{scan_num}.log")
-
-    def master_file(self, scan_num):
-        return os.path.join(self.scan_frames_dir, f"Scan_{scan_num}/Scan_{scan_num}_master.h5")
+        
+    # ------------ directories -----------
+    
 
 @dataclass
 class Scan:
@@ -60,26 +46,30 @@ class Scan:
     scan_num: int
     file_list: list = None
     
+    detector: str = field(default = 'Eiger', repr = True)
+    sample_name: str = field(default = None, repr = True)
+    
     def __post_init__(self):
+        
         # ----------------------------
-        # 1) Load / Parse Log File
-        # ----------------------------
-        log_path = self.exp.log_file(self.scan_num)        
+        # Parse Log File
+        log_path = self.log_file(self.scan_num) 
+        print(log_path)
         with open(log_path, 'r') as log_file:
             log_str = ''
             for line in log_file:
                 if line.startswith('# '):
                     log_str += line.strip('# ')
                     
-
         _, scan_defs, _ = parse_log(log_str)
-
-        # self.attributes = normalize_attributes(self.attributes)
         
         for scan_name, scan_dict in scan_defs.items():
             inject_attrs(self, scan_dict, scan_name)
+            
         # ______________ Data Dir ______________
-        self.data_dir = self.exp.scan_dir(self.scan_num)
+        self.data_dir = self.scan_dir(self.scan_num)
+        
+        print(f"Data Directory is : {self.data_dir}")
         
         files_h5  = sorted(glob.glob(os.path.join(self.data_dir, "*.h5")))
         files_nxs = sorted(glob.glob(os.path.join(self.data_dir, "*.nxs")))
@@ -94,9 +84,35 @@ class Scan:
 
         if all(hasattr(self, x) for x in ["scan_y_start_point", "scan_y_end_point", "scan_y_steps_count"]):
             self.step_size_y = (self.scan_y_end_point - self.scan_y_start_point) / self.scan_y_steps_count
-        # _________ 
-        master_file = self.exp.master_file(scan_num)
+        
+        # _________  Master File ________
+        master_file = self.master_file(self.scan_num)
 
+        with h5py.File(master_file, "r") as f:
+            self.wavelength = f["/entry/instrument/beam/incident_wavelength"][...] * ut.UNIT_MAP['Angs']
+            self.energy = wavelength_a2energy(self.wavelength)
+
+    
+    def __repr__(self):
+        class_name = type(self).__name__
+        sample_name = self.sample_name if self.sample_name is not None else ''
+        
+        return f"{class_name} | sample: {sample_name} | step_size={self.step_size_x, self.step_size_y}, step_points = {self.scan_x_steps_count, self.scan_y_steps_count}"
+        
+    def scan_dir(self, scan_num):
+        """Returns full directory for a particular scan number."""
+        if self.detector == "Eiger":
+            return os.path.join(self.exp.scan_frames_dir, f"Scan_{scan_num}")
+        
+        else:
+            return os.path.join(self.exp.scan_frames_dir, f"Scan_{scan_num}_{self.detector}")
+
+    def log_file(self, scan_num):
+        return os.path.join(self.exp.logs_dir, f"Scan_{scan_num}.log")
+
+    def master_file(self, scan_num):
+        return os.path.join(self.exp.scan_frames_dir, f"Scan_{scan_num}/Scan_{scan_num}_master.h5")
+        
 @dataclass
 class ROI:
 
@@ -140,7 +156,6 @@ class ROI:
     def __post_init__(self):
         # Copy attributes from Scan into ROI
         for f in vars(self.scan):
-            print(f)
             setattr(self, f, getattr(self.scan, f))
 
     # _______________ Properties ________________
