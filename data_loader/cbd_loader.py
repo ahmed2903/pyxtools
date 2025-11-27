@@ -568,6 +568,7 @@ class load_data:
         """
         
         self.coherent_imgs[roi_name] = make_2dimensions_even(self.coherent_imgs[roi_name], num_jobs=self.num_jobs)
+        
     def order_pixels(self, roi_name):
         """Reorders the pixels of coherent images and corresponding k-vectors based on their distance from the center.
     
@@ -799,6 +800,7 @@ class load_data:
 
         plt.tight_layout()
         plt.show()
+        
     def plot_4d_dataset(self, roi_name: str):
         """Plots the 4D dataset for a specified region of interest (ROI).
     
@@ -930,7 +932,7 @@ class load_data:
         fig, ax = plt.subplots(figsize=(6, 6))
         
         # Initial image
-        vmin, vmax = np.min(img_list[0]), np.max(img_list[0])  # Normalize color scale
+        vmin, vmax = np.min(img_list[0][2:-2, 2:-2]), np.max(img_list[0])  # Normalize color scale
         im = ax.imshow(img_list[0], cmap='viridis') #, vmin=vmin, vmax=vmax)
         ax.set_title(f"Coherent Image {0}/{num_images - 1}")
         plt.colorbar(im, ax=ax, label="Intensity")
@@ -938,8 +940,9 @@ class load_data:
         
         def update_image(img_idx):
             """Updates the displayed image when the slider is moved."""
-            img = img_list[img_idx]
+            img = img_list[img_idx][2:-2, 2:-2]
             img_mean = np.mean(img)
+            
             vmin = img_mean - 0.05 * img_mean
             vmax = img_mean + scale_factor * img_mean
             
@@ -954,6 +957,7 @@ class load_data:
 
         display(interactive_plot)  # Show slider
         #display(fig)  # Display the figure
+    
     def plot_averag_coh_imgs(self, roi_name, vmin=None, vmax=None, title=None):
         """Plots the average of coherent images for a given region of interest (ROI).
 

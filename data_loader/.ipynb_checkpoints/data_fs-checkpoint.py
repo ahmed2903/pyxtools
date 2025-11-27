@@ -4,7 +4,7 @@ from tqdm.notebook import tqdm, trange
 
     
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import requests
+#import requests
 import concurrent.futures
 from joblib import Parallel, delayed
 

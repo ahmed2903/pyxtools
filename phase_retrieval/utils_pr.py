@@ -45,11 +45,14 @@ def reconstruction_repeats(recon_class, iterations, fname, repeats = 5,  n_jobs=
     
 
     
-def calc_obj_freq_bandwidth(lr_psize):
+def calc_obj_freq_bandwidth(lr_psize, sub_pixel_fac):
     """
     Calculate the Object bandwidth based on the step size in scanning mode.  
     """
-    omega_obj_x, omega_obj_y = 2 * np.pi / lr_psize, 2 * np.pi / lr_psize
+    omega_obj_x, omega_obj_y = sub_pixel_fac * 2 * np.pi / lr_psize, sub_pixel_fac * 2 * np.pi / lr_psize
+    
+    # For sub-pixel imaging, increasing the bandwidth of the object
+    #omega_obj_x, omega_obj_y = 4 * np.pi / lr_psize, 4 * np.pi / lr_psize
 
     return omega_obj_x, omega_obj_y
 
@@ -88,6 +91,27 @@ def prepare_dims(images, pupil_kins, lr_psize, extend = None, band_multiplier = 
         
         ky_min = ky_min - range_y/2
         ky_max = ky_max + range_y/2
+
+    elif extend == 'triple' :
+        range_x = (kx_max - kx_min)
+        range_y = (ky_max - ky_min)
+        
+        kx_min =  (kx_min - 1*range_x)
+        kx_max = (kx_max + 1 * range_x)
+        
+        ky_min = (ky_min - 1*range_y)
+        ky_max = (ky_max + 1*range_y)
+
+
+    elif extend == 'quadruple' :
+        range_x = (kx_max - kx_min)
+        range_y = (ky_max - ky_min)
+        
+        kx_min =  (kx_min - 1.5*range_x)
+        kx_max = (kx_max + 1.5 * range_x)
+        
+        ky_min = (ky_min - 1.5*range_y)
+        ky_max = (ky_max + 1.5*range_y)
 
     # FIX ME!!!
     elif extend == 'by_bandwidth':

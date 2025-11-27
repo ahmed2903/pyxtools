@@ -8,6 +8,8 @@ from time import strftime
 import functools
 import multiprocessing as mp
 from tqdm import tqdm 
+from scipy.signal import convolve2d
+
 
 def time_it(func):
     """Decorator to measure execution time of a function."""
@@ -43,11 +45,14 @@ def reconstruction_repeats(recon_class, iterations, fname, repeats = 5,  n_jobs=
     
 
     
-def calc_obj_freq_bandwidth(lr_psize):
+def calc_obj_freq_bandwidth(lr_psize, sub_pixel_fac):
     """
     Calculate the Object bandwidth based on the step size in scanning mode.  
     """
-    omega_obj_x, omega_obj_y = 2 * np.pi / lr_psize, 2 * np.pi / lr_psize
+    omega_obj_x, omega_obj_y = sub_pixel_fac * 2 * np.pi / lr_psize, sub_pixel_fac * 2 * np.pi / lr_psize
+    
+    # For sub-pixel imaging, increasing the bandwidth of the object
+    #omega_obj_x, omega_obj_y = 4 * np.pi / lr_psize, 4 * np.pi / lr_psize
 
     return omega_obj_x, omega_obj_y
 
@@ -69,8 +74,6 @@ def prepare_dims(images, pupil_kins, lr_psize, extend = None, band_multiplier = 
     # Object size == Scan length
     Lx, Ly = coh_img_dim[0] * lr_psize, coh_img_dim[1] * lr_psize
 
-    
-
     # High-resolution Fourier pixel size 
     dkx, dky = 2 * np.pi / Lx, 2 * np.pi / Ly
 
@@ -78,8 +81,6 @@ def prepare_dims(images, pupil_kins, lr_psize, extend = None, band_multiplier = 
     kx, ky = pupil_kins[:, 0], pupil_kins[:, 1]
     kx_min, kx_max = np.min(kx), np.max(kx)
     ky_min, ky_max = np.min(ky), np.max(ky)
-
-    
     
     if extend == 'double' :
         range_x = kx_max - kx_min
@@ -90,6 +91,27 @@ def prepare_dims(images, pupil_kins, lr_psize, extend = None, band_multiplier = 
         
         ky_min = ky_min - range_y/2
         ky_max = ky_max + range_y/2
+
+    elif extend == 'triple' :
+        range_x = (kx_max - kx_min)
+        range_y = (ky_max - ky_min)
+        
+        kx_min =  (kx_min - 1*range_x)
+        kx_max = (kx_max + 1 * range_x)
+        
+        ky_min = (ky_min - 1*range_y)
+        ky_max = (ky_max + 1*range_y)
+
+
+    elif extend == 'quadruple' :
+        range_x = (kx_max - kx_min)
+        range_y = (ky_max - ky_min)
+        
+        kx_min =  (kx_min - 1.5*range_x)
+        kx_max = (kx_max + 1.5 * range_x)
+        
+        ky_min = (ky_min - 1.5*range_y)
+        ky_max = (ky_max + 1.5*range_y)
 
     # FIX ME!!!
     elif extend == 'by_bandwidth':
@@ -262,3 +284,48 @@ def pad_to_double_parallel(image_list, n_jobs=8):
     
     )
     return padded_images
+    
+@time_it
+def pad_array_flexible(arr, target_shape, mode='constant', constant_values=0, center=True):
+    """
+    More flexible padding function using numpy.pad.
+    
+    Parameters:
+    -----------
+    arr : array_like
+        Input array
+    target_shape : tuple
+        Target shape for the padded array
+    mode : str or function, optional
+        Padding mode (see numpy.pad documentation)
+    constant_values : scalar, optional
+        Value to use for constant padding
+    center : bool, optional
+        If True, center the array; if False, pad at the end
+        
+    Returns:
+    --------
+    np.ndarray
+        Padded array
+    """
+    arr = np.asarray(arr)
+    
+    if len(arr.shape) != len(target_shape):
+        raise ValueError(f"Dimension mismatch: array has {len(arr.shape)}D, target is {len(target_shape)}D")
+    
+    pad_widths = []
+    for current, target in zip(arr.shape, target_shape):
+        if target < current:
+            raise ValueError(f"Target size {target} is smaller than current size {current}")
+        
+        pad_total = target - current
+        if center:
+            pad_before = pad_total // 2
+            pad_after = pad_total - pad_before
+        else:
+            pad_before = 0
+            pad_after = pad_total
+            
+        pad_widths.append((pad_before, pad_after))
+    
+    return np.pad(arr, pad_widths, mode=mode, constant_values=constant_values)

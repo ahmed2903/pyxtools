@@ -19,8 +19,8 @@ from .utils_zernike import *
 
 class difference_map:
 
-    def __init__(self, images, pupil_func: str, kout_vec, ks_pupil, 
-                 lr_psize, object_est=None, object_estFT=None,
+    def __init__(self, images, pupil_func, kout_vec, ks_pupil, 
+                 lr_psize, sub_pixel_factor = 1, object_est=None, object_estFT=None,
                  num_jobs=4):
 
         '''
@@ -35,6 +35,7 @@ class difference_map:
         self.kout_vec = kout_vec
         self.ks_pupil = ks_pupil
         self.lr_psize = lr_psize
+        self.sub_pixel_factor = sub_pixel_factor
         
         self.object_est = object_est   #has shape different from the pupil_function
         self.object_estFT = object_estFT  
@@ -44,12 +45,7 @@ class difference_map:
 
         self.zoom_factor = 1
         self.num_jobs = num_jobs
-
-        self.Npupil_rows, self.Npupil_cols = self.pupil_func.shape
-        self.Ncoherent_imgs, self.Nr1, self.Nc1 = self.images.shape
-
-        self.Npupil_rows_up = self.Npupil_rows
-        self.Npupil_cols_up = self.Npupil_cols
+        
 
 
     @time_it
@@ -68,19 +64,26 @@ class difference_map:
         self._prep_images()
         
         self.kout_vec = np.array(self.kout_vec)
+        
         self.bounds_x, self.bounds_y, self.dks = prepare_dims(self.images, self.ks_pupil, self.lr_psize, extend = self.extend)
 
         self.kx_min_n, self.kx_max_n = self.bounds_x
         self.ky_min_n, self.ky_max_n = self.bounds_y
         self.dkx, self.dky = self.dks
         
-        omegas = calc_obj_freq_bandwidth(self.lr_psize)
+        omegas = calc_obj_freq_bandwidth(self.lr_psize, self.sub_pixel_factor)
         self.omega_obj_x, self.omega_obj_y = omegas
 
         self._load_pupil()
         
         self._initiate_recons_images()
 
+        self.Npupil_rows, self.Npupil_cols = self.pupil_func.shape
+        self.Ncoherent_imgs, self.Nr1, self.Nc1 = self.images.shape
+
+        self.Npupil_rows_up = self.Npupil_rows
+        self.Npupil_cols_up = self.Npupil_cols
+        
     def _prep_images(self):
         
         self.images = np.abs(np.array(self.images))
@@ -92,6 +95,7 @@ class difference_map:
         self.images = np.array(self.images)
         
     def _initiate_recons_images(self):
+        
         if self.object_est is None and self.object_estFT is None: 
             self.object_est = np.ones_like(self.images[0]).astype(complex)
             self.object_estFT = np.ones_like(self.images[0]).astype(complex)
@@ -113,9 +117,14 @@ class difference_map:
         '''
         
         dims = round((self.kx_max_n - self.kx_min_n)/self.dkx), round((self.ky_max_n - self.ky_min_n)/self.dky)
+        print(f" dim of new pupil are : {dims}")
+        
         dims = make_dims_even(dims)
 
         full_array = np.zeros(dims, dtype = complex)
+
+        print(f" full array shape is {full_array.shape}")
+
         
         if isinstance(self.pupil_func, str):
             pupil_func = np.load(self.pupil_func)
@@ -126,46 +135,66 @@ class difference_map:
 
         if self.extend == 'double':
             factor = 2
+        elif self.extend == 'triple':
+            factor = 3
+        elif self.extend == 'quadruple':
+            factor = 4
         elif self.extend == None:
             factor = 1
             
         # Get the scaling factors for each dimension
-        scale_x = dims[0] / pupil_func.shape[0] / factor
-        scale_y = dims[1] / pupil_func.shape[1] / factor
+        scale_x = ( dims[0] / pupil_func.shape[0] / factor )
+        scale_y = ( dims[1] / pupil_func.shape[1] / factor )
+
+        print(f" scale-x is {scale_x}")
+        print(f" scale-y is {scale_y}")
 
         # Scale the pupil phase array to match the required pupil dimensions
-        scaled_pupil_func = pupil_func #zoom(pupil_func, (scale_x, scale_y))
+        scaled_pupil_func = zoom(pupil_func, (scale_x, scale_y)) #pupil_func 
+
+        print(f" scaled_pupil_func shape is {scaled_pupil_func.shape}")
 
         # Calculate center indices
         N, M = dims[0]//factor, dims[1]//factor
         
         start_x, start_y = (dims[0] - N) // 2, (dims[1] - M) // 2
         end_x, end_y = start_x + N, start_y + M
+
     
         # Set central region to ones
         full_array[start_x:end_x, start_y:end_y] = scaled_pupil_func
         
         self.pupil_func = full_array
+        
         self.Npupil_rows_up, self.Npupil_cols_up = self.pupil_func.shape
 
     
     def _upsample_coherent_images(self):
+
+        '''
+        This method upsamples the measured coherent images to the shape of pupil function
+        As this will be useful for our Pupil and Object spectrum update to match all the dimensions
+        '''
+        
         Nx, Ny = self.pupil_func.shape
+        
         upsamp_img = np.zeros((self.Ncoherent_imgs, Nx, Ny), dtype = complex)
         
         for k in range(self.Ncoherent_imgs):
+            
             image = self.images[k]
+            
             image_FT = self._fft2(image)
+            
             new_image_FT = np.zeros((Nx, Ny), dtype=complex)
+            
             new_image_FT[Nx//2 - self.Nr1//2 : Nx//2 + self.Nr1//2, Ny//2 -self.Nc1//2: Ny//2 + self.Nc1//2] = image_FT
+            
             upsamp_img[k] = np.abs(self._ifft2(new_image_FT))/ (self.Nr1**2/self.Npupil_rows_up**2) #Attention!!
     
         return upsamp_img
 
-
-        
-
-    def iterate(self, iterations, upsample_coherent_images=True, live_plot = True):
+    def iterate(self, iterations, live_plot = True):
 
         
         #upsample the coherent images to have the same shape as of pupil
@@ -173,6 +202,7 @@ class difference_map:
 
         # Initial Guess
         phi_0 = np.random.random(self.pupil_func.shape)
+        
         self.object_est_up = self.imSeqLowRes[0]*np.exp(1j*0.02*phi_0)
             
         self.object_estFT_up = self._fft2(self.object_est_up)
@@ -185,7 +215,7 @@ class difference_map:
         for it in range(iterations):
             print(f"iteration {it+1}")
             
-            self.object_est_up = self._ifft2(self.object_estFT_up) #
+            self.object_est_up = self._ifft2(self.object_estFT_up) 
 
             #update object FT upsampled
             self.object_estFT_up = self._objectFT_update()
@@ -204,10 +234,15 @@ class difference_map:
         are at the centre
         '''
         exit_FT_centred = []
-        for i, (kx_iter, ky_iter) in enumerate(self.kout_vec): 
-            this_pupil = self._get_pupil_patch_centred(kx_iter, ky_iter)  
+        
+        for i, (kx_iter, ky_iter) in enumerate(zip(self.kout_vec[:,0], self.kout_vec[:, 1])): 
+            
+            this_pupil = self._get_pupil_patch_centred(kx_iter, ky_iter) 
+            
             this_PSI = self._get_exitFT(this_pupil, self.object_estFT_up)
+            
             exit_FT_centred.append(this_PSI)   
+            
         self.PSI_FT_centred = np.array(exit_FT_centred)
 
 
@@ -217,28 +252,34 @@ class difference_map:
         '''
         print(f"Pupil updates")
         denom = np.zeros_like(self.pupil_func)
+
         numer = np.zeros_like(self.pupil_func)
         PSI_FT = []
+        
         objectFT = []
-        for i, (kx_iter, ky_iter) in enumerate(self.kout_vec):  
-            this_objectFT = self._shift_objectFT(kx_iter, ky_iter)
-            denom += np.abs(this_objectFT)**2
-            this_PSI = self._get_exitFT(self.pupil_func, this_objectFT)
-            numer += np.conjugate(this_objectFT) * this_PSI
+        
+        for i, (kx_iter, ky_iter) in enumerate(zip(self.kout_vec[:,0], self.kout_vec[:, 1])):  
             
-            objectFT.append(this_objectFT)
-            PSI_FT.append(this_PSI)
+            this_objectFT = self._shift_signalFT(kx_iter, ky_iter, self.object_estFT_up)
+            
+            denom += np.abs(this_objectFT)**2
+            
+            this_PSI = self._shift_signalFT(kx_iter, ky_iter, self.PSI_FT_centred[i] )
+            
+            numer += np.conjugate(this_objectFT) * this_PSI
+    
             
         pupil_func_update = numer/(denom+10**-15)   # use self.pupil_func
-        self.PSI_FT = np.array(PSI_FT)
-        self.objectFT_shifted = np.array(objectFT)
+        
+        
         return pupil_func_update
 
-    def _shift_objectFT(self, kx_iter, ky_iter):
+    def _shift_signalFT(self, kx_iter, ky_iter, arrFT):
+        
         '''
-        This method shifts the object's FT estimate to the (kx_cidx, ky_cidx) location
+        This method shifts any signal in Fourier spcae to the (kx_iter, ky_iter) location
         '''
-        object_patch = np.zeros_like(self.pupil_func)
+        array_patch = np.zeros_like(self.pupil_func)
         
         kx_cidx = round((kx_iter - self.kx_min_n) / self.dkx)
         kx_lidx = round(max(kx_cidx - self.omega_obj_x / (2 * self.dkx), 0))
@@ -253,29 +294,42 @@ class difference_map:
         cl = self.Npupil_cols_up//2 - self.Nc1//2
         ch = self.Npupil_cols_up//2 + self.Nc1//2 
 
-        object_patch[kx_lidx:kx_hidx, ky_lidx:ky_hidx] = self.object_estFT_up[rl:rh, cl:ch]  
-        return object_patch
+        array_patch[kx_lidx:kx_hidx, ky_lidx:ky_hidx] = arrFT[rl:rh, cl:ch]  
+        
+        return array_patch
 
     def _get_exitFT(self, pupil, objectFT):
         return pupil*objectFT
 
     ###--------
     def _objectFT_update(self):
+        
         print(f"Object FT updates")
+        
         Nx, Ny = self.pupil_func.shape
+        
         denom = np.zeros_like(self.pupil_func)
+        
         numer = np.zeros_like(self.pupil_func)
-        for i, (kx_iter, ky_iter) in enumerate(self.kout_vec): 
+        
+        for i, (kx_iter, ky_iter) in enumerate(zip(self.kout_vec[:,0], self.kout_vec[:, 1])): 
+            
             this_pupil = self._get_pupil_patch_centred(kx_iter, ky_iter)
+            
             denom += np.abs(this_pupil)**2
-            this_PSI = self._get_exitFT(this_pupil, self.object_estFT_up)
+            
+            this_PSI = self.PSI_FT_centred[i]
+            
             numer += np.conjugate(this_pupil) * this_PSI #self.get_exitFT_centred(this_pupil) 
+            
         objectFT_update = numer/(denom + 10**-15)
+        
         return objectFT_update
 
     def _get_pupil_patch_centred(self, kx_iter, ky_iter):
+        
         '''
-        This method get Pupil patch to the centre
+        This method gets Pupil patch to the centre
         '''
         pupil_func_patch = np.zeros_like(self.pupil_func).astype(complex) 
         
@@ -297,34 +351,26 @@ class difference_map:
         return pupil_func_patch
 
 
-    def get_exitFT_centred(self, pupil):
-        '''
-        This method initializes the exit field in Fourier domain
-        objectFT: (128, 128)
-        '''
-        rl = self.Npupil_rows_up//2 - self.Nr1//2
-        rh = self.Npupil_rows_up//2 + self.Nr1//2
-        cl = self.Npupil_cols_up//2 - self.Nc1//2
-        ch = self.Npupil_cols_up//2 + self.Nc1//2
 
-        # Bring the exit patch to the centre
-        exit_FT = np.zeros_like(self.pupil_func)
-        exit_FT[rl:rh, cl:ch] =  pupil * self.object_estFT_up
-        self.exitFT_centred = exit_FT
-        return exit_FT
-
-    def difference_map_engine(self):
+    def difference_map_engine(self, beta = 0.9):
         '''
         Write description of the algorithm
         '''
         PSI_n = np.zeros_like(self.PSI_FT_centred).astype(complex)
+        
         for i, (image, kx_iter, ky_iter) in enumerate(tqdm(zip(self.imSeqLowRes, self.kout_vec[:, 0], self.kout_vec[:, 1]), 
                                                                desc="Processing", total=len(self.images), unit="images")):  #Marker
+            
             this_pupil = self._get_pupil_patch_centred(kx_iter, ky_iter)
+            
             Ps_psi = self._get_exitFT(this_pupil, self.object_estFT_up)
+            
             Rs_psi = 2*Ps_psi - self.PSI_FT_centred[i]
+            
             Pm_rpsi = self.project_data(image, Rs_psi)
-            PSI_n[i] = self.PSI_FT_centred[i] + Pm_rpsi - Ps_psi 
+            
+            PSI_n[i] = self.PSI_FT_centred[i] + beta*( Pm_rpsi - Ps_psi) 
+            
         return PSI_n
 
     def project_data(self, image, arr_FT):
@@ -332,8 +378,11 @@ class difference_map:
         measurement projection
         '''
         psi =  self._ifft2(arr_FT) 
+        
         psi_new = np.sqrt(image)*np.exp(1j*np.angle(psi))
+        
         PSI_PM  =  self._fft2(psi_new)  
+        
         return PSI_PM
 
     def _fft2(self, arr):
@@ -399,8 +448,7 @@ class difference_map:
         img_phase.set_data(phase_obj)
         img_pupil_amp.set_data(amplitude_pupil)
         img_pupil_phase.set_data(pupil_phi)
-        
-        
+         
         # amp_mean = np.mean(amplitude_obj)
         # vmin = max(amp_mean + 2 * amp_mean, 0)
         # vmax = amp_mean + 10 * amp_mean
@@ -424,7 +472,9 @@ class difference_map_zern(difference_map):
         
         #zero_padding the object guess FT to have the same shape as of pupil_func
         self.object_estFT_up = pad_array_flexible(self.object_estFT, target_shape = self.pupil_func.shape) 
-        self.object_est_up = np.fft.ifft2(self.object_estFT_up)/ (self.Nr1**2/self.Npupil_rows_up**2) #self._ifft2(self.object_estFT_up) #
+        
+        self.object_est_up = np.fft.ifft2(self.object_estFT_up)/ (self.Nr1**2/self.Npupil_rows_up**2)  
+        
         #upsample the coherent images to have the same shape as of pupil
         self.up_imSeqLowRes = self._upsample_coherent_images()   
 
@@ -473,6 +523,7 @@ class difference_map_zern(difference_map):
 
 
     def _extract_pupil(self, pupil_arr):
+        
         '''
         This is the helper method for imposing 
         Zernike constraint
@@ -480,19 +531,27 @@ class difference_map_zern(difference_map):
         '''
         
         shape_r, shape_c = pupil_arr.shape
+        
         rl = shape_r//2 - self.Npupil_rows//2
+        
         rh = (shape_r//2 + self.Npupil_rows//2) 
+        
         cl = shape_c//2 - self.Npupil_cols//2
+        
         ch = (shape_c//2 + self.Npupil_cols//2) 
+        
         pupil_arr_cropped = pupil_arr[rl: rh, cl : ch]
+        
         return pupil_arr_cropped
 
     def _assemble_pupil(self, pupil_arr_cropped):
+        
         '''
         This is the helper method for imposing 
         Zernike constraint
         Put back the pupil_arr_cropped to pupil_arr 
         '''
+        
         shape_r, shape_c = self.pupil_func.shape
         
         
@@ -502,11 +561,13 @@ class difference_map_zern(difference_map):
         ch = (shape_c//2 + self.Npupil_cols//2) 
         
         pupil_arr = self.pupil_func
+        
         pupil_arr [rl : rh, cl: ch] = pupil_arr_cropped 
         
         return pupil_arr
 
     def _Zernike_proj(self, wavefront):
+        
         '''
         This function impose Zernike constraint on the given phase wavefront
         
@@ -515,23 +576,24 @@ class difference_map_zern(difference_map):
         
         wavefront_range = wavefront.max() - wavefront.min()
 
-        if wavefront_range > 2*np.pi:
-            wavefront = unwrap_phase(wavefront)
-
         # Constructing the wavefront using Zernike 
 
         square_poly = SquarePolynomials() 
 
         # Create coordinate grids
+        
         side_x = np.linspace(-1/np.sqrt(2), 1/np.sqrt(2), shape_x)
+        
         side_y = np.linspace(-1/np.sqrt(2), 1/np.sqrt(2), shape_y)
 
         X, Y = np.meshgrid(side_x, side_y)
+        
         xdata = [X, Y]
 
         coeffs = extract_square_coefficients_vectorized(wavefront)
 
         all_results = square_poly.evaluate_all(xdata, coeffs)
+        
         new_wavefront = sum(all_results.values())
 
         return new_wavefront
@@ -542,18 +604,25 @@ class difference_map_zern(difference_map):
         Generate a 2D Gaussian kernel.
         """
         ax = np.linspace(-(size // 2), size // 2, size)
+        
         xx, yy = np.meshgrid(ax, ax)
+        
         kernel = np.exp(-(xx**2 + yy**2) / (2 * sigma**2))
+        
         kernel = kernel/np.sum(kernel)
+        
         return kernel 
 
 
     def _smoothing_constraint(self, image, size=5, sigma=4):
+        
         """
         Apply Gaussian filter to image
         """
         kernel = self._gaussian_kernel(size, sigma)
+        
         filtered = convolve2d(image, kernel, mode='same', boundary='symm')
+        
         return filtered
 
 class difference_map_test(difference_map_zern):
@@ -564,13 +633,20 @@ class difference_map_test(difference_map_zern):
         '''
     
         PSI_n = np.zeros_like(self.PSI_FT_centred).astype(complex)
+        
         for i, (image, kx_iter, ky_iter) in enumerate(tqdm(zip(self.up_imSeqLowRes, self.kout_vec[:, 0], self.kout_vec[:, 1]), 
                                                                desc="Processing", total=len(self.images), unit="images")):  #Marker
+            
             this_pupil = self._get_pupil_patch_centred(kx_iter, ky_iter)
+            
             Ps_psi = self._get_exitFT(this_pupil, self.object_estFT_up)
+            
             Rs_psi = 2*Ps_psi - self.PSI_FT_centred[i]
+            
             Pm_rpsi = self.project_data(image, Rs_psi)
+            
             PSI_n[i] = self.PSI_FT_centred[i] + Pm_rpsi - Ps_psi 
+        
         return PSI_n
 
     def _objectFT_update(self):
