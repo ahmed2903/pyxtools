@@ -52,14 +52,14 @@ def plot_full_detector(roi:ROI, file_no, frame_no,
         frame_no (int): The frame number within the specified file.
     """
     direc = roi.data_dir
-    if roi.beamtime == 'new':
+    try:
         file_no_st = (6-len(str(file_no)))*'0' + str(file_no)
         
         file_name = os.path.join(direc , f'Scan_{roi.scan_num}_data_{file_no_st}.h5')
 
         with h5py.File(file_name,'r') as f:
             data_test = f['/entry/data/data'][frame_no,:,:]
-    else:
+    except:
         file_no_st = '0'*5 + str(1)
         filename = os.path.join(direc,f'Scan_{roi.scan_num}_data_{file_no_st}.h5')
         data_test = stack_4d_data_old(filename, [0,-1,0,-1], roi.fast_axis_steps, roi.slow_axis)[file_no,frame_no, :,:]
@@ -81,151 +81,6 @@ def plot_full_detector(roi:ROI, file_no, frame_no,
     plt.tight_layout()
     plt.show()
 
-def plot_partial_4d(roi : ROI, vmin1 = None, vmax1 = None,vmin2 = None, vmax2 = None, pixel_threshold=1):
-
-    # Get dataset dimensions
-    coherent_shape = roi.data_4d.shape[:2]  
-    detector_shape = roi.data_4d.shape[2:]  
-
-    # --- Compute detector mean image for thresholding ---
-    det_mean = np.mean(roi.data_4d, axis=(0,1))  # shape (px, py)
-
-    mask = det_mean >= pixel_threshold
-    allowed_pixels = np.argwhere(mask)  # list of [py, px]
-
-    if len(allowed_pixels) == 0:
-        raise ValueError(
-            f"No detector pixels exceed threshold {pixel_threshold}."
-        )
-
-    # Build labels for dropdown
-    coord_labels = [f"({px},{py})" for py, px in allowed_pixels]
-
-
-
-    # Dropdown restricted to allowed detector pixels
-    p_dropdown = widgets.Dropdown(
-        options=list(zip(coord_labels, allowed_pixels)),
-        description="px,py"
-    )
-
-    # Helper to unpack dropdown value
-    def get_px_py(drop_value):
-        py, px = drop_value   # stored as [py, px]
-        return px, py
-
-    # Sliders for coherent indexing (unchanged)
-    lcol_slider = widgets.IntSlider(
-        min=0, max=coherent_shape[1] - 1,
-        value=coherent_shape[1] // 2,
-        description="lx"
-    )
-    lrow_slider = widgets.IntSlider(
-        min=0, max=coherent_shape[0] - 1,
-        value=coherent_shape[0] // 2,
-        description="ly"
-    )
-
-    rectangle_size_det = 4
-    rectangle_size_coh = 2
-
-    # ----------------- Initial draw -----------------
-    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-
-    # use first allowed pixel
-    py0, px0 = allowed_pixels[0]
-    prow0, pcol0 = py0, px0
-
-    coherent_image = make_coherent_image(roi.data_4d, np.array([prow0, pcol0]))
-    detector_image = make_detector_image(
-        roi.data_4d, np.array([lrow_slider.value, lcol_slider.value])
-    )
-
-    # Thresholding on initial coherent image
-    if det_mean[prow0, pcol0] < pixel_threshold:
-        coherent_image = np.zeros_like(coherent_image)
-
-    im0 = axes[0].imshow(
-        coherent_image, cmap='plasma',
-        vmin=vmin1, vmax=vmax1
-    )
-    axes[0].set_title("Coherent Image")
-    rect_coherent = Rectangle(
-        (lcol_slider.value - rectangle_size_coh / 2,
-         lrow_slider.value - rectangle_size_coh / 2),
-        rectangle_size_coh, rectangle_size_coh,
-        edgecolor='white', facecolor='none', lw=2
-    )
-    axes[0].add_patch(rect_coherent)
-    plt.colorbar(im0, ax=axes[0])
-
-    im1 = axes[1].imshow(
-        detector_image, cmap='viridis',
-        vmin=vmin2, vmax=vmax2
-    )
-    axes[1].set_title("Detector Image")
-    rect_detector = Rectangle(
-        (pcol0 - rectangle_size_det / 2,
-         prow0 - rectangle_size_det / 2),
-        rectangle_size_det, rectangle_size_det,
-        edgecolor='white', facecolor='none', lw=2
-    )
-    axes[1].add_patch(rect_detector)
-    plt.colorbar(im1, ax=axes[1])
-    plt.tight_layout()
-
-    # ----------------- update_plot -----------------
-    def update_plot(prow, pcol, lrow, lcol):
-        coherent_image = make_coherent_image(
-            roi.data_4d, np.array([prow, pcol])
-        )
-        detector_image = make_detector_image(
-            roi.data_4d, np.array([lrow, lcol])
-        )
-
-        # Apply threshold if needed
-        if det_mean[prow, pcol] < pixel_threshold:
-            coherent_image = np.zeros_like(coherent_image)
-
-        # dynamic scaling
-        vmin_c = np.mean(coherent_image) - 0.05 * np.mean(coherent_image)
-        vmax_c = np.mean(coherent_image) + 0.05 * np.mean(coherent_image)
-        vmin_d = np.mean(detector_image) - 0.3 * np.mean(detector_image)
-        vmax_d = np.mean(detector_image) + 0.2 * np.mean(detector_image)
-
-        im0.set_data(coherent_image)
-        im1.set_data(detector_image)
-        im0.set_clim(vmin_c, vmax_c)
-        im1.set_clim(vmin_d, vmax_d)
-
-        axes[0].set_title(f"Coherent Image from pixel ({pcol},{prow})")
-        axes[1].set_title(f"Detector Image at ({lcol},{lrow})")
-
-        rect_detector.set_xy(
-            (pcol - rectangle_size_det / 2,
-             prow - rectangle_size_det / 2)
-        )
-        rect_coherent.set_xy(
-            (lcol - rectangle_size_coh / 2,
-             lrow - rectangle_size_coh / 2)
-        )
-
-        fig.canvas.draw_idle()
-
-    # ----------------- interactive binding -----------------
-
-    def wrapped_update(selected_px_py, lrow, lcol):
-        pcol, prow = get_px_py(selected_px_py)
-        update_plot(prow, pcol, lrow, lcol)
-
-    interactive_plot = widgets.interactive(
-        wrapped_update,
-        selected_px_py=p_dropdown,
-        lrow=lrow_slider,
-        lcol=lcol_slider
-    )
-
-    display(interactive_plot)
     
 def plot_4d_dataset(roi : ROI, vmin1 = None, vmax1 = None,vmin2 = None, vmax2 = None, pixel_threshold=None):
     """Plots the 4D dataset for a specified region of interest (ROI).
@@ -487,7 +342,6 @@ def plot_kouts(roi:ROI, vmin=None, vmax = None, title="Mapped kouts", cmap = "vi
     """
     plot_map_on_detector(roi.averaged_det_images, roi.kout_coords, 
                          vmin, vmax, title, cmap, crop=False,roi= roi.coords)
-
 
 
 

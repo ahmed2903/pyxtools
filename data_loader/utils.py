@@ -10,6 +10,7 @@ from functools import wraps
 hplanck = 6.62606868E-34  # Js  Plank consant
 c = 299792458  # m/s   Speed of light
 Ang = 1e-10  # m Angstrom
+nm = 1e-9
 echarge = 1.6021733E-19  # C  electron charge
 emass = 9.109e-31  # kg Electron rest mass
 r0 = 2.8179403227e-15  # m classical electron radius = e^2/(4pi*e0*me*c^2)
@@ -43,7 +44,7 @@ def time_it(func):
         return result  # Return original function result
     return wrapper
 
-def energy2wavelength_a(energy_kev: float) -> float:
+def energy2wavelength(energy_kev: float, unit = nm) -> float:
     """
     Converts energy in keV to wavelength in A
     wavelength_a = energy2wave(energy_kev)
@@ -55,18 +56,18 @@ def energy2wavelength_a(energy_kev: float) -> float:
 
     # SI: E = hc/lambda
     lam = hplanck * c / E # in meters
-    wavelength_a = lam / Ang # in angstroms
+    wavelength_a = lam / unit 
 
     return wavelength_a
 
-def wavelength_a2energy(wavelength):
+def wavelength2energy(wavelength, unit = nm):
     """
     Converts wavelength in A to energy in keV
-     Energy [keV] = h*c/L = 12.3984 / lambda [A]
+     Energy [keV] = h*c/L = 12.3984 / lambda 
     """
 
     # SI: E = hc/lambda
-    lam = wavelength * Ang
+    lam = wavelength * unit
     E = hplanck * c / lam
 
     # Electron Volts:
