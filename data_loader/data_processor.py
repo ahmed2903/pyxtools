@@ -177,6 +177,7 @@ def pool_detector_space(roi:ROI, kernel_size, padding=0):
                                   edges of the image before pooling. Defaults to 0.
     """
     print("Pooling detector ...")
+    
     roi.data_4d = sum_pool2d_array(roi.data_4d, kernel_size=kernel_size,
                                                    stride=None,
                                                    padding=0)
@@ -193,7 +194,7 @@ def pool_detector_space(roi:ROI, kernel_size, padding=0):
 
     
 @log_roi_params    
-def normalise_detector(cls, roi:ROI, reference_roi:ROI):
+def normalise_detector(roi:ROI, reference_roi:ROI):
     """Normalizes the detector data based on the reference ROI's peak intensity.
 
     Args:
@@ -206,7 +207,7 @@ def normalise_detector(cls, roi:ROI, reference_roi:ROI):
         peak_intensity = np.sum(reference_roi.data_4d, axis=(-2,-1))
         
     except: 
-        cls.make_4d_dataset(reference_roi)
+        make_4d_dataset(reference_roi)
         peak_intensity = np.sum(reference_roi.data_4d, axis=(-2,-1))
         print(peak_intensity.shape)
     
