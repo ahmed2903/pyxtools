@@ -202,7 +202,7 @@ def plot_coherent_sequence(roi: ROI, scale_factor = .4):
         vmax = img_mean + scale_factor * img_mean
         
         im.set_data(img)  # Update image data
-        im.set_clim(vmin, vmax)
+        #im.set_clim(vmin, vmax)
         
         ax.set_title(f"Coherent Image {img_idx}/{num_images - 1}")  # Update title
         fig.canvas.draw_idle()  # Efficient redraw
