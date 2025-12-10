@@ -14,6 +14,7 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from tqdm import tqdm 
 import os 
+# import cv2
 
 from .data_fs import *
 from .kvectors import make_coordinates, compute_vectors, optimise_kin, reverse_kins_to_pixels, rotation_matrix, calc_qvec, extract_parallel_line, extract_streak_region
@@ -46,13 +47,13 @@ def make_4d_dataset(roi: ROI, num_jobs = 64):
     print(direc)
     fnames = list_datafiles(direc)[:-2]     
     
-    if roi.detector == 'Eiger':
+    if roi.detector.lower() == 'eiger':
         data_4d = stack_4d_data(direc, fnames,  roi.coords, 
                                                 slow_axis = roi.slow_axis, 
                                                 conc=True, 
                                                 num_jobs=num_jobs)
         
-    elif roi.detector == 'Lambda':
+    elif roi.detector.lower() == 'lambda':
         
         data_4d = stack_4d_data_lambda(direc, fnames, 
                                                 roi.coords, 
@@ -74,6 +75,14 @@ def make_4d_dataset(roi: ROI, num_jobs = 64):
     roi.data_4d = mask_hot_pixels(data_4d, 
                                 mask_max_coh = False, 
                                 mask_min_coh = False)
+
+def apply_detector_mask(roi:ROI, mask):
+
+    rs,re,cs,ce = roi.coords
+    
+    mask_roi = mask[rs:re, cs:ce]
+
+    roi.data_4d = roi.data_4d * mask_roi[None, None, :,:]
     
 def estimate_pupil_size(pupil_roi:ROI, mask_val):
     """
@@ -490,6 +499,7 @@ def filter_coherent_images(roi:ROI, variance_threshold):
                                     variance below this threshold will be filtered out.
 
     """
+    N = roi.coherent_imgs.shape[0]
     
     cleaned_coh_images, cleaned_kins, cleaned_kxky = filter_images(images = roi.coherent_imgs, 
                                                                      coords = roi.kins,
@@ -500,6 +510,11 @@ def filter_coherent_images(roi:ROI, variance_threshold):
     roi.coherent_imgs = cleaned_coh_images.copy()
     roi.kouts = cleaned_kxky.copy()
     roi.kins = cleaned_kins.copy()
+
+    N2 =  roi.coherent_imgs.shape[0]
+
+    print(f"Filtered out {N - N2} images")
+    print(f"Number of images: {N2}")
     
 @log_roi_params
 def remove_coh_background(roi:ROI, sigma, num_jobs = -1):
@@ -557,7 +572,7 @@ def apply_median_filter(roi:ROI, kernel_size, stride, threshold, num_jobs = -1):
                                                           n_jobs=num_jobs)
     
 @log_roi_params
-def apply_bilateral_filter(self, roi:ROI, sigma_spatial, sigma_range, kernel_size, num_jobs = -1):
+def apply_bilateral_filter(roi:ROI, sigma_spatial, sigma_range, kernel_size, num_jobs = -1):
     """Applies a bilateral filter to the coherent images for a given region of interest (ROI).
 
     Args:
@@ -763,10 +778,10 @@ def std_line(args):
 @time_it
 def std_detector_frames(scan: Scan, detector = 'Eiger', plot=False, num_jobs = 32):
 
-    if detector == 'Eiger':
+    if detector.lower() == 'eiger':
         dataset_key="entry/data/data"
 
-    elif detector == "Lambda":
+    elif detector.lower() == "lambda":
         dataset_key = "/entry/instrument/detector/data"
         
     args_list = [(file, dataset_key) for file in scan.file_list[:-1]]

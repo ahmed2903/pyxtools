@@ -10,7 +10,7 @@ from joblib import Parallel, delayed
 
 from multiprocessing import Pool
 
-
+import cv2
 import h5py
 import os
 from skimage.measure import shannon_entropy
@@ -39,7 +39,7 @@ def load_hdf_roi(args):
     
     with h5py.File(file_path,'r') as f:
         
-        data = f['/entry/data/data'][:,roi[0]:roi[1], roi[2]:roi[3]]
+        data = f['/entry/data/data'][1:-1,roi[0]:roi[1], roi[2]:roi[3]] # Loading ROI only, and discarding first and last frames
         
     return data
     
@@ -139,13 +139,14 @@ def stack_data(data_folder, names_array, roi, conc = True):
     return stacked_data
     
 @time_it 
-def stack_4d_data(data_folder, names_array, roi, slow_axis = 0, conc = False, num_jobs = 4):
+def stack_4d_data(data_folder, names_array, roi, slow_axis: str = 'scan_x', conc = False, num_jobs = 4):
 
     
     nx = roi[1] - roi[0] # roi vertical size
     ny = roi[3] - roi[2] # roi horizontal size
     
     args_list = [(data_folder, name, roi) for name in names_array]
+
     
     if conc:
         #with concurrent.futures.ProcessPoolExecutor() as executor:
@@ -159,10 +160,18 @@ def stack_4d_data(data_folder, names_array, roi, slow_axis = 0, conc = False, nu
             all_data.append(load_hdf_roi(data_folder, names_array[i], roi)  )
         all_data = np.array(all_data)
         
-    stacked_data = np.stack(all_data, axis=0)
-    if slow_axis == 0: 
+    stacked_data = np.stack(all_data, axis=0) # Stacking the data
+    
+    if slow_axis == 'scan_x': 
 
         stacked_data = np.transpose(stacked_data, (1,0,2,3))
+
+    elif slow_axis == 'scan_y':
+        stacked_data = stacked_data
+
+    else:
+        raise ValueError("Scan axis should be scan_x or scan_y")
+
     
     return stacked_data
 
@@ -178,13 +187,14 @@ def load_nxs_roi(args):
         dataset = f["/entry/instrument/detector/data"]
 
         # Read only the ROI slice from disk (no full load!)
-        frame = dataset[:, x0:x1, y0:y1]
+        # Discard rubish frames
+        frame = dataset[1:-1, x0:x1, y0:y1]
 
     return frame
     
 @time_it 
 def stack_4d_data_lambda(data_folder, names_array, roi,
-                         slow_axis=0, conc=False, num_jobs=4):
+                         slow_axis='scan_x', conc=False, num_jobs=4):
 
     nx = roi[1] - roi[0]  # vertical ROI size
     ny = roi[3] - roi[2]  # horizontal ROI size
@@ -203,8 +213,15 @@ def stack_4d_data_lambda(data_folder, names_array, roi,
     # shape fixes
     stacked_data = np.stack(all_data, axis=0)
 
-    if slow_axis == 0:
-        stacked_data = np.transpose(stacked_data, (1, 0, 2, 3))
+    if slow_axis == 'scan_x': 
+
+        stacked_data = np.transpose(stacked_data, (1,0,2,3))
+
+    elif slow_axis == 'scan_y':
+        stacked_data = stacked_data
+
+    else:
+        raise ValueError("Scan axis should be scan_x or scan_y")
 
     return stacked_data
     
@@ -563,12 +580,11 @@ def align_images(image_list, ref_idx = None):
         list of np.ndarray: A list of aligned images.
     
     """
-    print(ref_idx)
     aligned_images = []
     if ref_idx is None:
-        ref_idx = len(image_list)//2
-    ref_img = image_list[ref_idx]  # Use first image as reference
-    # aligned_images.append(ref_img)
+        ref_img = np.mean(image_list, axis = 0)
+    else:    
+        ref_img = image_list[ref_idx]  # Use first image as reference
     
     for img in image_list:
         # avg = np.mean(np.array(aligned_images), axis = 0)    
@@ -908,16 +924,16 @@ def bilateral_filter(images, sigma_spatial=3, sigma_range=50, kernel_size=7, n_j
     def _bilateral_single(image):
         return cv2.bilateralFilter(image, d=kernel_size, sigmaColor=sigma_range, sigmaSpace=sigma_spatial)
     
-    if image_or_stack.ndim == 2:
+    if images.ndim == 2:
         return _bilateral_single(images)
         
-    elif image_or_stack.ndim == 3:
+    elif images.ndim == 3:
         if n_jobs > 1:
             results = Parallel(n_jobs=n_jobs)(
                 delayed(_bilateral_single)(img) for img in images
             )
         else:
-            results = [_bilateral_single(img) for img in image_or_stack]
+            results = [_bilateral_single(img) for img in images]
             
         return np.stack(results, axis=0)
     

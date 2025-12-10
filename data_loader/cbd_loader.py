@@ -129,7 +129,7 @@ class ROI:
 
     # acquired later
     data_4d: np.ndarray = field(default=None, repr=False) # 4D Data set (x, y, fx, fy)
-    centre_pixel: np.ndarray = field(default=None, repr=False)
+    centre_pixel: np.ndarray = field(default=(0,0), repr=False)
     
     # to be set automatically
     __averaged_det_images: np.ndarray = field(default=None, repr=False)  # Average of all detector frames 
@@ -184,7 +184,7 @@ class ROI:
     @averaged_det_images.setter
     def averaged_det_images(self, value):
         self.__averaged_det_images = value
-        
+    
     @property
     def averaged_coherent_images(self):
         
@@ -219,8 +219,8 @@ class ROI:
 
             exp_params = h5f.create_group("experimental_params")
 
-            exp_params.attrs['year'] = self.year
-            exp_params.attrs['id'] = self.beamtime_id
+            # exp_params.attrs['year'] = self.year
+            # exp_params.attrs['id'] = self.beamtime_id
             exp_params.attrs['scan_no'] = self.scan_num
             
             exp_params.attrs['step_size_x'] = self.step_size_x
@@ -287,14 +287,14 @@ class ROI:
                                         
             # Load Processed Images 
             params = h5f["experimental_params"]
-            
+            self.scan_num = params.attrs['scan_no']
             self.step_size_x = params.attrs['step_size_x']
             self.step_size_y = params.attrs['step_size_y']
-            self.slow_axis = params.attrs['slow_axis'] 
+            self.slow_axis = params.attrs['slow_axis']
 
             params = h5f["processing_params"]
-            
-            process_params.attrs['det_distance'] = self.det_distance
+            self.det_distance = params.attrs['det_distance'] 
+
             images = h5f["processed_images"]
             
             self.coherent_imgs = images["coherent_images"][...]

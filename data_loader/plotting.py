@@ -9,7 +9,7 @@ import ipywidgets as widgets
 import os
 import h5py
 from .cbd_loader import ROI
-from .data_fs import mask_hot_pixels, make_coherent_image, make_detector_image, stack_4d_data_old
+from .data_fs import mask_hot_pixels, make_coherent_image, make_detector_image, stack_4d_data_old, compute_histograms
 
 def plot_detector_roi(roi:ROI, file_no, frame_no, title=None, vmin=None, vmax=None,mask_hot = True, save=False):
     """Plots a region of interest (ROI) on the detector for a given frame.
@@ -167,7 +167,7 @@ def plot_4d_dataset(roi : ROI, vmin1 = None, vmax1 = None,vmin2 = None, vmax2 = 
     
     display(interactive_plot)  # Display the interactive widget
 
-def plot_coherent_sequence(roi: ROI, scale_factor = .4):
+def plot_coherent_sequence(roi: ROI, scale_factor = .4, vmin = None, vmax = None):
     """Displays a sequence of coherent images and allows scrolling through them via a slider.
 
     Args:
@@ -176,30 +176,31 @@ def plot_coherent_sequence(roi: ROI, scale_factor = .4):
         scale_factor (float, optional): A factor to scale the maximum color intensity 
                                          for the images. Default is 0.4.
     """
-    
+        
     img_list = roi.coherent_imgs  # List of coherent images
 
     num_images = len(img_list)  # Number of images in the list
     
     # Create a slider for selecting the image index
     img_slider = widgets.IntSlider(min=0, max=num_images - 1, value=0, description="Image")
-
+    
+    vmin_box =  widgets.FloatText(value=.1,description='Vmin:',disabled=False)
+    
+    vmax_box = widgets.FloatText(value=1,description='Vmax:',disabled=False)
+    
+    
     # Create figure & axis once
     fig, ax = plt.subplots(figsize=(6, 6))
-    
-    # Initial image
-    vmin, vmax = np.min(img_list[0]), np.max(img_list[0])  # Normalize color scale
     im = ax.imshow(img_list[0], cmap='viridis') #, vmin=vmin, vmax=vmax)
     ax.set_title(f"Coherent Image {0}/{num_images - 1}")
     plt.colorbar(im, ax=ax, label="Intensity")
+    ax.set_ylabel('Scan-Y')
+    ax.set_xlabel('Scan-X')
     plt.tight_layout()
     
-    def update_image(img_idx):
+    def update_image(img_idx, vmin, vmax):
         """Updates the displayed image when the slider is moved."""
         img = img_list[img_idx]
-        img_mean = np.mean(img)
-        vmin = img_mean - 0.05 * img_mean
-        vmax = img_mean + scale_factor * img_mean
         
         im.set_data(img)  # Update image data
         im.set_clim(vmin, vmax)
@@ -208,13 +209,13 @@ def plot_coherent_sequence(roi: ROI, scale_factor = .4):
         fig.canvas.draw_idle()  # Efficient redraw
 
     # Create interactive slider
-    interactive_plot = widgets.interactive(update_image, img_idx=img_slider)
+    interactive_plot = widgets.interactive(update_image, img_idx=img_slider, vmin = vmin_box, vmax = vmax_box)
 
     display(interactive_plot)  # Show slider
     #display(fig)  # Display the figure
 
 
-def plot_averag_coh_imgs(roi:ROI, vmin=None, vmax=None, title=None):
+def plot_averag_coh_imgs(roi:ROI, vmin=None, vmax=None, cmap = 'viridis', title=None):
     """Plots the average of coherent images for a given region of interest (ROI).
 
     Args:
@@ -225,9 +226,28 @@ def plot_averag_coh_imgs(roi:ROI, vmin=None, vmax=None, title=None):
     #avg = np.mean(np.array(self.coherent_imgs[roi_name]), axis = 0)
 
     if title is None:
-        title = f"Average Coherent Images"
+        title = f"Average Coherent Images: Scan {roi.scan_num}"
         
-    plot_roi_from_numpy(avg, name=title, vmin=vmin, vmax=vmax)
+    # plot_roi_from_numpy(avg, name=title, vmin=vmin, vmax=vmax)
+
+    if roi.slow_axis == 'scan_x':
+        x_add = "Slow Axis"
+        y_add = "Fast Axis"
+
+    elif roi.slow_axis == 'scan_y':
+        x_add = "Fast Axis"
+        y_add = "Slow Axis"
+    plt.figure()
+    plt.imshow(avg, vmin = vmin, vmax = vmax, cmap=cmap)
+    plt.title(title)
+    
+    
+        
+    plt.xlabel(': '.join(('Scan-X', x_add)))
+    plt.ylabel(': '.join(('Scan-Y', y_add)))
+    
+    plt.colorbar()
+    plt.show()
     
 def plot_detected_objects(roi:ROI):
     """Displays the detected objects in coherent images with a slider for navigation.
