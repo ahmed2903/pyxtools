@@ -50,11 +50,13 @@ class Scan:
     def __post_init__(self):
 
         # ----------------------------
+        self.detector = self.detector.title()
         # detector pixel size 
         if self.detector == 'Eiger':
             self.det_psize = 75 * ut.UNIT_MAP['um']
         elif self.detector == "Lambda":
             self.det_psize = 55 * ut.UNIT_MAP['um']
+
         
         # ----------------------------
         # Parse Log File
@@ -230,7 +232,7 @@ class ROI:
             
             process_params = h5f.create_group("processing_params")
             
-            process_params.attrs['roi'] = json.dumps(self.coords)
+            process_params.attrs['roi'] = str(self.coords)
             process_params.attrs['det_distance'] = self.det_distance
             
             images = h5f.create_group("processed_images")

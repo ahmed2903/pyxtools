@@ -199,7 +199,6 @@ def stack_4d_data_lambda(data_folder, names_array, roi,
     nx = roi[1] - roi[0]  # vertical ROI size
     ny = roi[3] - roi[2]  # horizontal ROI size
 
-    print('hi')
     args_list = [(data_folder, name, roi) for name in names_array]
 
     if conc:

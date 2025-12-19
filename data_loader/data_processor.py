@@ -27,7 +27,7 @@ from .cbd_loader import ROI, Scan, Exp
 ################### Loading data ###################
 
 @time_it
-def make_4d_dataset(roi: ROI, num_jobs = 64):
+def make_4d_dataset(roi: ROI, num_jobs = 64, mask = None):
     
     """Creates a 4D dataset from a region of interest (ROI) on the detector.
 
@@ -46,13 +46,18 @@ def make_4d_dataset(roi: ROI, num_jobs = 64):
     direc = roi.data_dir
     print(direc)
     fnames = list_datafiles(direc)[:-2]     
-    
+    rs,re,cs,ce = roi.coords
     if roi.detector.lower() == 'eiger':
         data_4d = stack_4d_data(direc, fnames,  roi.coords, 
                                                 slow_axis = roi.slow_axis, 
                                                 conc=True, 
                                                 num_jobs=num_jobs)
-        
+        if mask is not None:
+            mask_roi = mask[rs:re, cs:ce]
+            data_4d = data_4d * mask_roi[None, None, :,:]
+            
+        data_4d = np.flip(data_4d, axis = 2)
+    
     elif roi.detector.lower() == 'lambda':
         
         data_4d = stack_4d_data_lambda(direc, fnames, 
@@ -60,6 +65,13 @@ def make_4d_dataset(roi: ROI, num_jobs = 64):
                                                 slow_axis = roi.slow_axis, 
                                                 conc=True, 
                                                 num_jobs=num_jobs)
+
+        if mask is not None:
+            mask_roi = mask[rs:re, cs:ce]
+            data_4d = data_4d * mask_roi[None, None, :,:]
+            
+        data_4d = np.flip(data_4d, axis = 3)
+    
 
     # except:
     #     direc = os.path.join(roi.data_dir , f"Scan_{roi.scan_num}_data_000001.h5")
@@ -75,6 +87,8 @@ def make_4d_dataset(roi: ROI, num_jobs = 64):
     roi.data_4d = mask_hot_pixels(data_4d, 
                                 mask_max_coh = False, 
                                 mask_min_coh = False)
+
+        
 
 def apply_detector_mask(roi:ROI, mask):
 
@@ -197,7 +211,8 @@ def pool_detector_space(roi:ROI, kernel_size, padding=0):
     if roi.kout_coords is not None:
         roi.kout_coords = np.unique(roi.kout_coords // kernel_size)
     
-    roi.coords = np.array(roi.coords) // kernel_size
+    roi.coords = list(np.array(roi.coords) // kernel_size)
+    roi.averaged_det_images = np.mean(roi.data_4d, axis = (0,1))
     
     print("Done.")
 
@@ -778,6 +793,7 @@ def std_line(args):
 @time_it
 def std_detector_frames(scan: Scan, detector = 'Eiger', plot=False, num_jobs = 32):
 
+    detector = scan.detector
     if detector.lower() == 'eiger':
         dataset_key="entry/data/data"
 
