@@ -14,7 +14,7 @@ from scipy.signal import convolve2d
 #from ..data_fs import * #downsample_array, upsample_images, pad_to_double
 
 from skimage.restoration import unwrap_phase
-from .utils_zernike import *
+from .zernike import *
 
 from .epry_abstract import Plot, LivePlot, PhaseRetrievalBase
 
