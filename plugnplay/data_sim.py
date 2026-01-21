@@ -132,6 +132,7 @@ def apply_intensity(img):
 # ---------------------------------------------------------
 
 def apply_noise(img, noise_lvl):
+    
     noise = np.random.poisson(img)
     # if np.random.rand() < 0.4:
     #     # Gaussian
@@ -148,7 +149,6 @@ def apply_noise(img, noise_lvl):
     #     )
 
     # spatially varying noise
-    sigma_map = np.random.uniform(0.7, 1.3, size=img.shape)
     return img + noise 
 
 

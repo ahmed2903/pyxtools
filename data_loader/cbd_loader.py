@@ -283,6 +283,7 @@ class ROI:
             roi_name (str): The ROI name for which the data should be loaded.
             file_path (str): Path to the HDF5 file containing saved data.
         """
+        
         self = cls.__new__(cls)
 
         with h5py.File(file_path, "r") as h5f:

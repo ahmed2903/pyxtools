@@ -271,7 +271,7 @@ def stack_4d_data_old(file_path, roi, fast_axis_steps, slow_axis = 0):
 
 
 ################# Process Data #################
-@time_it
+# @time_it
 def sum_pool2d_array(input_array, kernel_size, stride=None, padding=0):
     """
     Perform sum pooling on a 4D NumPy array or PyTorch tensor.
@@ -297,8 +297,14 @@ def sum_pool2d_array(input_array, kernel_size, stride=None, padding=0):
         input_tensor = input_array  
     
     # Perform sum pooling
-    pooled = F.avg_pool2d(input_tensor, kernel_size, stride, padding) #* (kernel_size**2)
     
+    if len(input_tensor.size()) < 3:
+        input_tensor = input_tensor.unsqueeze(0).unsqueeze(0)
+
+
+    pooled = F.avg_pool2d(input_tensor, kernel_size, stride, padding) #* (kernel_size**2)
+
+    pooled = pooled.squeeze(0).squeeze(0)
     # Convert back to NumPy array if input was NumPy
     if is_numpy:
         return pooled.numpy()
